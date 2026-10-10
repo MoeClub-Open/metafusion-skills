@@ -1,20 +1,24 @@
 # 工作副本、提交与恢复
 
-普通编目使用 `local/tools/mf-workspace.mjs`。每个 Agent 使用自己的工作区，最多 100 个实体/关系条目，一个待推送提交。工作区绑定实例 origin 与操作者，凭据仍从本机 credentials.json 或环境读，工作区不存 PAT。
+云端模式使用 [云端操作](reference-cloud.md)，无需执行下述本地命令。普通本地编目使用 `local/tools/mf-workspace.mjs`。每个 Agent 使用自己的工作区，最多 100 个实体/关系条目，一个待推送提交。工作区绑定实例 origin 与操作者，凭据仍从本机 credentials.json 或环境读，工作区不存 PAT。
 
 ## 编辑已有条目
 
-在工具目录运行：
+先在系统临时目录下创建独立任务目录，把所有中间文件与工作副本放进去。以下命令在 `local/tools/` 运行（POSIX shell；PowerShell 使用 `$env:TEMP` 和 `$env:MF_TASK_DIR`）：
 
 ```bash
-node mf-workspace.mjs init --dir ../../workspaces/agent-A
-node mf-workspace.mjs checkout --dir ../../workspaces/agent-A --entity <UUID> --relation <UUID>
-# 编辑该目录 entities/<UUID>.json、relations/<UUID>.json；保持只读字段不变
-node mf-workspace.mjs status --dir ../../workspaces/agent-A
-node mf-workspace.mjs commit --dir ../../workspaces/agent-A --note "官方题名修订" --sources sources.json
-node mf-workspace.mjs preview --dir ../../workspaces/agent-A
-node mf-workspace.mjs push --dir ../../workspaces/agent-A --apply
+export MF_TASK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/metafusion-agent.XXXXXXXX")"
+# init 要求工作副本目录尚不存在：
+node mf-workspace.mjs init --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.mjs checkout --dir "$MF_TASK_DIR/catalog" --entity <UUID> --relation <UUID>
+# 编辑 $MF_TASK_DIR/catalog/entities/<UUID>.json、relations/<UUID>.json；保持只读字段不变
+node mf-workspace.mjs status --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.mjs commit --dir "$MF_TASK_DIR/catalog" --note "官方题名修订" --sources "$MF_TASK_DIR/sources.json"
+node mf-workspace.mjs preview --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.mjs push --dir "$MF_TASK_DIR/catalog" --apply
 ```
+
+Windows PowerShell 示例：`$env:MF_TASK_DIR = Join-Path $env:TEMP ("metafusion-agent-" + [guid]::NewGuid().ToString('N'))`，`New-Item -ItemType Directory -Path $env:MF_TASK_DIR`；随后用 `$env:MF_TASK_DIR/catalog` 指定 `--dir`。绝不复用其他 Agent 的任务目录。`--sources` 等路径指向临时任务目录中的真实文件，不能因为改到临时目录就跳过来源核验。**有 pending、未知回执或恢复需要时禁止删除工作副本**；完成并核对后仅清理本任务生成的文件。
 
 先核 OpenAPI、definitions 与事实来源。`commit` 只写本地不可变请求，自动按对象键生成稀疏 patch；数组整体比较，不能以数组下标代表事实身份。`preview` 运行真实服务端校验后整笔回滚。`push --apply` 执行已获任务授权的写入，开关本身不是授权。
 
