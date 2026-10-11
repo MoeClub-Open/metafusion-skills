@@ -38,7 +38,7 @@ const digest = (x) =>
     .digest("hex");
 const escape = (x) => x.replaceAll("~", "~0").replaceAll("/", "~1");
 const clone = (x) => JSON.parse(JSON.stringify(x));
-export function diffDocument(base, working, target) {
+export function diffDocument(base, working, target, removals = []) {
   if (!fields[target] || !record(base) || !record(working))
     throw new Error("invalid_working_document");
   for (const k of new Set([...Object.keys(base), ...Object.keys(working)])) {
@@ -49,7 +49,7 @@ export function diffDocument(base, working, target) {
   function diff(a, b, p, aok, bok) {
     if (aok === bok && same(a, b)) return;
     if (!bok) {
-      result.push({ path: p, remove: true });
+      // Missing keys are omissions. Deletion needs a separate explicit path.
       return;
     }
     if (record(a) && record(b)) {
@@ -66,8 +66,76 @@ export function diffDocument(base, working, target) {
   }
   for (const k of fields[target])
     diff(base[k], working[k], `/${escape(k)}`, has(base, k), has(working, k));
+  if (!Array.isArray(removals)) throw new Error("invalid_explicit_removal");
+  for (const p of new Set(removals)) {
+    if (
+      typeof p !== "string" || !p.startsWith("/") ||
+      /~(?:[^01]|$)/.test(p) || !fields[target].has(parts(p)[0]) ||
+      !getAt(base, p).exists || getAt(working, p).exists ||
+      result.some((x) => x.path === p || x.path.startsWith(p + "/") || p.startsWith(x.path + "/"))
+    ) throw new Error(`invalid_explicit_removal:${p}`);
+    result.push({ path: p, remove: true });
+  }
   if (result.length > 200) throw new Error("too_many_patch_paths");
   return result;
+}
+function omittedPaths(base, working, target, removals = []) {
+  const ignored = [];
+  function visit(a, b, p) {
+    for (const k of Object.keys(a)) {
+      const child = `${p}/${escape(k)}`;
+      if (!has(b, k)) {
+        if (!removals.some((r) => child === r || child.startsWith(r + "/")))
+          ignored.push(child);
+      } else if (record(a[k]) && record(b[k])) visit(a[k], b[k], child);
+    }
+  }
+  for (const k of fields[target]) {
+    if (!has(base, k)) continue;
+    const p = `/${escape(k)}`;
+    if (!has(working, k)) {
+      if (!removals.includes(p)) ignored.push(p);
+    } else if (record(base[k]) && record(working[k])) visit(base[k], working[k], p);
+  }
+  return ignored;
+}
+export function identityPatch(patch) {
+  return patch.some(({ path: p }) => {
+    const keys = parts(p);
+    return keys[0] === "title" || keys[0] === "external_ids" ||
+      (keys[0] === "translations" && (keys.length <= 2 || keys[2] === "title"));
+  });
+}
+function validateReview(ids, allowLocal = false) {
+  if (!Array.isArray(ids) || ids.length > 1000 || new Set(ids).size !== ids.length ||
+      ids.some((id) => typeof id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) &&
+        !(allowLocal && /^@local:[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id))))
+    throw new Error("invalid_identity_review");
+  return ids;
+}
+function evidenceEligible(evidence, origin, blockedHosts = []) {
+  const blocked = new Set(["findverse.cc"]);
+  for (const value of [origin, process.env.MF_API_ORIGIN, process.env.MF_BASE, ...blockedHosts]) {
+    if (!value) continue;
+    try { blocked.add(new URL(value.includes("://") ? value : `https://${value}`).hostname.toLowerCase().replace(/\.$/, "")); }
+    catch { throw new Error("invalid_blocked_host"); }
+  }
+  for (const source of evidence) {
+    if (source?.kind === "self") throw new Error("source_not_eligible");
+    if (!record(source) || !["url", "publication"].includes(source.kind) ||
+        typeof source.citation !== "string" || !source.citation.trim())
+      throw new Error("invalid_source");
+    if (source.kind === "url" || (source.url !== undefined && source.url !== "")) {
+      let url;
+      try { url = new URL(source.url); } catch { throw new Error("invalid_source"); }
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password)
+        throw new Error("invalid_source");
+      const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+      if ([...blocked].some((host) => hostname === host || hostname.endsWith(`.${host}`)))
+        throw new Error("source_not_eligible");
+    }
+  }
 }
 function parts(pointer) {
   return pointer
@@ -148,7 +216,21 @@ function save(file, value, exclusive = false) {
   } finally {
     fs.closeSync(fd);
   }
-  fs.renameSync(temp, file);
+  try {
+    // Windows scanners may briefly hold the destination. Keep the replacement
+    // atomic even when retrying; copying over state/receipts can truncate them.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(temp, file);
+        return;
+      } catch (err) {
+        if (!["EPERM", "EBUSY"].includes(err.code) || attempt >= 5) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
+      }
+    }
+  } finally {
+    if (fs.existsSync(temp)) fs.unlinkSync(temp);
+  }
 }
 function safeFile(root, rel) {
   const full = path.resolve(root, rel);
@@ -239,6 +321,8 @@ export async function runWorkspace(
     commitID,
     resolutions = {},
     reviews = {},
+    removals = [],
+    blockedHosts = [],
     apply = false,
     requestFn = request,
   } = {},
@@ -293,18 +377,20 @@ export async function runWorkspace(
     if (state.format !== 1 || state.origin !== origin)
       throw new Error("workspace_origin_mismatch");
     const fileFor = (e) => safeFile(root, e.file);
+    const removalsFor = (e) => removals
+      .filter((p) => p.startsWith(`${e.target}:${e.id ?? e.ref}:`))
+      .map((p) => p.slice(`${e.target}:${e.id ?? e.ref}:`.length));
     const status = () =>
       state.entries
-        .map((e) => ({
-          target: e.target,
-          id: e.id ?? null,
-          ref: e.ref ?? null,
-          file: e.file,
-          patch: e.base
-            ? diffDocument(e.base, read(fileFor(e)), e.target)
-            : null,
-        }))
-        .filter((e, i) => e.patch === null || e.patch.length);
+        .map((e) => {
+          const working = read(fileFor(e));
+          return {
+            target: e.target, id: e.id ?? null, ref: e.ref ?? null, file: e.file,
+            patch: e.base ? diffDocument(e.base, working, e.target, removalsFor(e)) : null,
+            ignored_omissions: e.base ? omittedPaths(e.base, working, e.target, removalsFor(e)) : [],
+          };
+        })
+        .filter((e) => e.patch === null || e.patch.length || e.ignored_omissions.length);
     if (command === "status")
       return { ok: true, pending: state.pending, changes: status() };
     if (command === "checkout") {
@@ -386,6 +472,7 @@ export async function runWorkspace(
           review.reviewed_candidate_ids.some((x) => typeof x !== "string"))
       )
         throw new Error("identity_review_required");
+      if (target === "entity") validateReview(review.reviewed_candidate_ids, true);
       const rel = `${target === "entity" ? "entities" : "relations"}/new-${ref}.json`;
       save(safeFile(root, rel), doc, true);
       state.entries.push({
@@ -414,6 +501,7 @@ export async function runWorkspace(
         throw new Error("empty_or_excessive_commit");
       if (!editNote?.trim() || !Array.isArray(evidence) || !evidence.length)
         throw new Error("commit_evidence_required");
+      evidenceEligible(evidence, origin, blockedHosts);
       const request = {
         id: randomUUID(),
         definitions_etag: state.definitions_etag,
@@ -433,7 +521,10 @@ export async function runWorkspace(
     if (command === "commit") {
       if (state.pending) throw new Error("pending_commit");
       const operations = [],
-        snapshots = {};
+        snapshots = {}, ignored_omissions = [];
+      if (!Array.isArray(removals) || removals.some((p) => typeof p !== "string" ||
+          !state.entries.some((e) => e.id && p.startsWith(`${e.target}:${e.id}:/`))))
+        throw new Error("invalid_explicit_removal_target");
       for (const e of state.entries) {
         const doc = read(fileFor(e));
         snapshots[e.file] = doc;
@@ -448,7 +539,15 @@ export async function runWorkspace(
               : {}),
           });
         else {
-          const patch = diffDocument(e.base, doc, e.target);
+          const explicit = removalsFor(e),
+            patch = diffDocument(e.base, doc, e.target, explicit),
+            ignored = omittedPaths(e.base, doc, e.target, explicit);
+          if (ignored.length) ignored_omissions.push({ target: e.target, id: e.id, paths: ignored });
+          const reviewed = reviews[`${e.target}:${e.id}`];
+          if (e.target === "entity" && identityPatch(patch)) {
+            if (reviewed === undefined) throw new Error("identity_review_required");
+            validateReview(reviewed);
+          } else if (reviewed !== undefined) throw new Error("invalid_identity_review");
           if (patch.length)
             operations.push({
               target: e.target,
@@ -456,10 +555,13 @@ export async function runWorkspace(
               id: e.id,
               base_version: e.base.version,
               patch,
+              ...(reviewed !== undefined ? { reviewed_candidate_ids: reviewed } : {}),
             });
         }
       }
-      return seal(operations, note, sources, snapshots);
+      if (!operations.length && ignored_omissions.length)
+        return { ok: false, applied: false, reason: "omitted_keys_preserved_use_explicit_remove", ignored_omissions };
+      return { ...seal(operations, note, sources, snapshots), ignored_omissions };
     }
     const id = commitID ?? state.pending?.id,
       sealed = loadCommit(id),
@@ -482,19 +584,6 @@ export async function runWorkspace(
       save(stateFile, state);
       const journalFile = safeFile(root, `.mf/refresh/${id}.json`);
       const journal = fs.existsSync(journalFile) ? read(journalFile) : {};
-      // Preserve edits made after sealing: receipt is durable but refresh waits.
-      for (const e of state.entries)
-        if (
-          !same(read(fileFor(e)), sealed.snapshots[e.file]) &&
-          !same(read(fileFor(e)), journal[e.file])
-        ) {
-          return {
-            ok: false,
-            applied: true,
-            reason: "working_tree_changed_after_commit",
-            receipt,
-          };
-        }
       const entityIDs = state.entries
         .filter((e) => e.target === "entity")
         .map((e) => e.id ?? receipt.refs[e.ref]);
@@ -533,30 +622,42 @@ export async function runWorkspace(
         if (doc.version < item.version)
           throw new Error("stale_checkout_after_push");
       }
-      save(
-        journalFile,
-        Object.fromEntries(
-          state.entries.map((e) => [
-            e.file,
-            (e.target === "entity" ? co.entities : co.relations).find(
-              (x) => x.id === (e.id ?? receipt.refs[e.ref]),
-            ),
-          ]),
-        ),
-      );
+      const refresh = {}, conflicts = [], ignored_omissions = [];
+      for (const e of state.entries) {
+        const entityID = e.id ?? receipt.refs[e.ref];
+        const doc = (e.target === "entity" ? co.entities : co.relations).find(
+          (x) => x.id === entityID,
+        );
+        const working = read(fileFor(e)),
+          prior = journal.format === 2 ? journal.files?.[e.file]?.base : journal[e.file],
+          // A previous refresh may have written only some files before failing.
+          // Their server fields identify the durable journal's newer baseline.
+          base = prior && working.id === prior.id && working.version === prior.version
+            ? prior : sealed.snapshots[e.file],
+          patch = diffDocument(base, working, e.target),
+          result = rebasePatch(base, doc, patch, resolutions[`${e.target}:${entityID}`] ?? {}),
+          ignored = omittedPaths(base, working, e.target);
+        if (ignored.length) ignored_omissions.push({ target: e.target, id: entityID, paths: ignored });
+        if (result.conflicts.length)
+          conflicts.push({ target: e.target, id: entityID, paths: result.conflicts });
+        refresh[e.file] = { base: doc, working: result.working };
+      }
+      if (conflicts.length)
+        return { ok: false, applied: true, reason: "receipt_refresh_conflict", conflicts, receipt, ignored_omissions };
+      // Persist both baselines and preserved local edits before touching files.
+      // Retrying receipt after any write failure never loses or repeats a push.
+      save(journalFile, { format: 2, files: refresh });
       for (const e of state.entries) {
         e.id = e.id ?? receipt.refs[e.ref];
-        const doc = (e.target === "entity" ? co.entities : co.relations).find(
-          (x) => x.id === e.id,
-        );
-        e.base = doc;
+        e.base = refresh[e.file].base;
         delete e.ref;
-        save(fileFor(e), doc);
+        delete e.review;
+        save(fileFor(e), refresh[e.file].working);
       }
       state.definitions_etag = co.definitions_etag;
       state.pending = null;
       save(stateFile, state);
-      return { ok: true, applied: true, receipt };
+      return { ok: true, applied: true, receipt, ignored_omissions };
     }
     if (command === "rebase") {
       if (!["conflict", "rejected"].includes(state.pending.outcome))
@@ -564,6 +665,7 @@ export async function runWorkspace(
       const receipt = await requestFn(`${API}/commits/${id}`);
       if (receipt.status === 200) return finalize(receipt.body);
       if (receipt.status !== 404) throw new Error("receipt_unavailable");
+      evidenceEligible(commit.sources, origin, blockedHosts);
       for (const e of state.entries)
         if (!same(read(fileFor(e)), sealed.snapshots[e.file]))
           throw new Error("working_tree_changed_after_commit");
@@ -592,12 +694,7 @@ export async function runWorkspace(
       for (const op of commit.operations) {
         if (op.action === "create") {
           const refreshed = reviews[op.ref];
-          if (
-            refreshed !== undefined &&
-            (!Array.isArray(refreshed) ||
-              refreshed.some((x) => typeof x !== "string"))
-          )
-            throw new Error("invalid_identity_review");
+          if (refreshed !== undefined) validateReview(refreshed, true);
           rebased.push({
             ...op,
             ...(refreshed !== undefined
@@ -624,9 +721,21 @@ export async function runWorkspace(
             id: op.id,
             paths: result.conflicts,
           });
-        const patch = diffDocument(current, result.working, op.target);
-        if (patch.length)
-          rebased.push({ ...op, base_version: current.version, patch });
+        const patch = diffDocument(current, result.working, op.target,
+          op.patch.filter((p) => p.remove && getAt(current, p.path).exists && !getAt(result.working, p.path).exists).map((p) => p.path));
+        const refreshed = reviews[`${op.target}:${op.id}`];
+        if (refreshed !== undefined) validateReview(refreshed);
+        if (patch.length) {
+          const updated = { ...op, base_version: current.version, patch };
+          if (op.target === "entity" && identityPatch(patch)) {
+            if (refreshed !== undefined) updated.reviewed_candidate_ids = refreshed;
+            if (updated.reviewed_candidate_ids === undefined) throw new Error("identity_review_required");
+          } else {
+            if (refreshed !== undefined) throw new Error("invalid_identity_review");
+            delete updated.reviewed_candidate_ids;
+          }
+          rebased.push(updated);
+        }
         pendingWrites.push({ entry, current, working: result.working });
       }
       if (conflicts.length)
@@ -643,6 +752,10 @@ export async function runWorkspace(
           ).find((x) => x.id === entry.id);
         entry.base = current;
         save(fileFor(entry), edit ? edit.working : current);
+      }
+      for (const entry of state.entries.filter((e) => !e.id)) {
+        const op = rebased.find((x) => x.action === "create" && x.ref === entry.ref);
+        if (entry.target === "entity") entry.review = { reviewed_candidate_ids: op.reviewed_candidate_ids };
       }
       state.definitions_etag = co.definitions_etag;
       state.pending = null;
@@ -771,11 +884,11 @@ export async function runCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || command === "help") {
     console.log(
-      "mf-workspace init|checkout|create|status|commit|preview|push|receipt|rebase --dir DIR\ncheckout: --entity UUID / --relation UUID (repeatable)\ncreate: --target entity|relation --ref NAME --file document.json --review identity-review.json (entities)\ncommit: --note TEXT --sources sources.json\npush: --apply [--commit UUID]; preview/receipt: [--commit UUID]\nrebase: [--resolutions resolutions.json] [--reviews reviewed-candidates-by-ref.json]",
+      "mf-workspace init|checkout|create|status|commit|preview|push|receipt|rebase --dir DIR\ncheckout: --entity UUID / --relation UUID (repeatable)\ncreate: --target entity|relation --ref NAME --file document.json --review identity-review.json (entities)\ncommit: --note TEXT --sources sources.json [--reviews identity-reviews.json] [--remove entity:UUID:/path] (repeatable)\nMissing keys are preserved and reported as ignored_omissions; deletion requires --remove.\npush: --apply [--commit UUID]; preview/receipt: [--commit UUID]\nreceipt/rebase: [--resolutions resolutions.json]; rebase: [--reviews identity-reviews.json]\n--blocked-host HOST (repeatable): additional local evidence host blacklist",
     );
     return;
   }
-  const options = { entityIDs: [], relationIDs: [] };
+  const options = { entityIDs: [], relationIDs: [], removals: [], blockedHosts: [] };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === "--apply") {
@@ -814,6 +927,12 @@ export async function runCli(argv = process.argv.slice(2)) {
         break;
       case "--reviews":
         options.reviews = read(value);
+        break;
+      case "--remove":
+        options.removals.push(value);
+        break;
+      case "--blocked-host":
+        options.blockedHosts.push(value);
         break;
       case "--commit":
         options.commitID = value;

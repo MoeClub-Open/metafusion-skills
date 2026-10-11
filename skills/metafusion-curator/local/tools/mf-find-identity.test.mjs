@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { findIdentity, runCli } from "./mf-find-identity.mjs";
 
@@ -120,8 +121,10 @@ test("CLI 不完整响应非零；候选可返回零；结果文件仍为结构�
 
 test("帮助与导入无需凭据或网络", () => {
   const env = { ...process.env }; delete env.MF_PAT; delete env.MF_CREDENTIALS; delete env.MF_BASE;
-  const script = resolve("skills/metafusion-curator/local/tools/mf-find-identity.mjs");
-  const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8", env });
-  assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /候选上限/u);
+  const script = fileURLToPath(new URL("./mf-find-identity.mjs", import.meta.url));
+  for (const cwd of [process.cwd(), fileURLToPath(new URL(".", import.meta.url))]) {
+    const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8", env, cwd });
+    assert.equal(help.status, 0, help.stderr);
+    assert.match(help.stdout, /候选上限/u);
+  }
 });

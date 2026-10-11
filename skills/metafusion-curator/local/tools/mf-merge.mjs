@@ -5,7 +5,7 @@
 // merge_downstream_dups）——它们 80% 逻辑重复，且各自只认一类清单。
 //
 // 用法：
-//   node mf-merge.mjs --from-report <gap-report.json> [--kinds expression,medium,track] [--apply --sources <sources.json>]
+//   node mf-merge.mjs --from-report <gap-report.json> [--kinds expression,medium,track] [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]
 //   node mf-merge.mjs --pairs <pairs.json>              # [{kind, keep, lose, scopeNote}]
 //   node mf-merge.mjs --merge <keepId> <loseId> [--apply --sources <sources.json>]
 //
@@ -36,6 +36,10 @@ const PAIRS = opt("--pairs");
 const MERGE = opt("--merge");
 const SOURCES_FILE = opt("--sources");
 const mergeSources = SOURCES_FILE ? JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8")) : [];
+const REVIEWS_FILE = opt("--reviews");
+const mergeReviews = REVIEWS_FILE ? JSON.parse(fs.readFileSync(REVIEWS_FILE, "utf8")) : {};
+if (!mergeReviews || typeof mergeReviews !== "object" || Array.isArray(mergeReviews))
+  throw new Error("--reviews 必须是按 entity:<保留方UUID> 提供已审查 canonical ID 数组的对象");
 if (APPLY && (!Array.isArray(mergeSources) || mergeSources.length === 0)) {
   throw new Error("--apply 必须通过 --sources <sources.json> 提供已核验的真实来源；不能仅凭审计重复候选或 self 合并");
 }
@@ -68,7 +72,8 @@ async function handlePair(kind, keepId, loseId, scopeNote) {
     skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 身份冲突 ${conflicts.join(",")}`, conflicts }); return;
   }
 
-  const r = await mergeEntity({ kind, keep, lose, scopeNote: note, dryRun: !APPLY, sources: mergeSources });
+  const r = await mergeEntity({ kind, keep, lose, scopeNote: note, dryRun: !APPLY, sources: mergeSources,
+    reviewedCandidateIDs: mergeReviews[`entity:${keepId}`] ?? [] });
   if (r.ok) {
     if (r.reason === "merged") merged += 1; else skipped += 1;
     log.push({ kind, keepId, loseId, result: r.reason, ...r });
@@ -118,9 +123,9 @@ if (MERGE) {
     }
   }
 } else {
-  console.error("用法：node mf-merge.mjs --from-report <gap-report.json> [--kinds a,b] [--apply --sources <sources.json>]");
-  console.error("      node mf-merge.mjs --pairs <pairs.json> [--apply --sources <sources.json>]");
-  console.error("      node mf-merge.mjs --merge <keepId>,<loseId> [--apply --sources <sources.json>]");
+  console.error("用法：node mf-merge.mjs --from-report <gap-report.json> [--kinds a,b] [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]");
+  console.error("      node mf-merge.mjs --pairs <pairs.json> [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]");
+  console.error("      node mf-merge.mjs --merge <keepId>,<loseId> [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]");
   process.exit(2);
 }
 

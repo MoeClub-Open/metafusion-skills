@@ -12,10 +12,11 @@
 //   · **同键异值的外部标识 = 两侧指向不同真实对象**，合并前一律拒绝。
 //   · 403/429 不等于失效；404 只表明当前调用者不可见或目标不存在。
 
-import { request, listAll } from "../metafusion-api.mjs";
+import { request, listAll, publicFailure } from "../metafusion-api.mjs";
 
 import { randomUUID } from "node:crypto";
-import { diffDocument } from "./mf-workspace.mjs";
+import { diffDocument, identityPatch } from "./mf-workspace.mjs";
+import { findIdentity } from "./mf-find-identity.mjs";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 统一调用：直接透传技能客户端的 request，便于脚本处理非 2xx。 */
@@ -290,6 +291,7 @@ export async function mergeEntity({
   dryRun = true,
   relationType = "same-scope duplicate",
   sources = [],
+  reviewedCandidateIDs = [],
 }) {
   let changes = [],
     conflicts = [],
@@ -334,6 +336,7 @@ export async function mergeEntity({
     );
   if (!keep?.id || !lose?.id || keep.id === lose.id)
     return result(false, "invalid_merge_pair");
+  if (!Array.isArray(reviewedCandidateIDs)) return result(false, "invalid_identity_review");
 
   // 两端版本和关系都在任何写入前检查，防止把过时并集覆盖到刚读取的新版本上。
   const [currentKeep, currentLose] = await Promise.all([
@@ -374,6 +377,46 @@ export async function mergeEntity({
   conflicts = union.conflicts;
   if (conflicts.length)
     return result(false, "field_conflict: 不自动丢弃对侧不同值");
+  const mergedEntity = { ...currentKeep, ...union.entity },
+    patch = diffDocument(currentKeep, mergedEntity, "entity");
+  let identityReview;
+  if (identityPatch(patch)) {
+    if (!Array.isArray(reviewedCandidateIDs) || reviewedCandidateIDs.length > 1000 ||
+        new Set(reviewedCandidateIDs).size !== reviewedCandidateIDs.length ||
+        reviewedCandidateIDs.some((id) => id === keep.id || typeof id !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)))
+      return result(false, "invalid_identity_review");
+    const scope = ["expression", "content_unit"].includes(kind)
+      ? { workId: mergedEntity.work_id }
+      : kind === "medium" ? { releaseId: mergedEntity.release_id }
+      : kind === "track" ? { mediumId: mergedEntity.medium_id } : {};
+    if (Object.values(scope).some((id) => typeof id !== "string" || !id))
+      return result(false, "identity_scope_unverified");
+    const review = await findIdentity({
+      kind, ...scope,
+      titles: [mergedEntity.title, ...Object.values(mergedEntity.translations ?? {}).map((t) => t?.title).filter(Boolean)],
+      externalIds: Object.entries(mergedEntity.external_ids ?? {}).map(([provider, value]) => ({ provider, value })),
+    });
+    if (!review.coverage.complete || review.unknown.length || review.errors.length)
+      return result(false, "identity_review_unverified", { identity_review: review });
+    const candidateIDs = review.candidates
+      .filter((c) => c.canonical_id !== keep.id)
+      .map((c) => c.canonical_id).sort();
+    if (candidateIDs.some((id) => typeof id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)))
+      return result(false, "identity_review_unverified", { identity_review: review });
+    const allowed = new Set([lose.id, ...reviewedCandidateIDs]),
+      unreviewed = candidateIDs.filter((id) => !allowed.has(id));
+    if (unreviewed.length)
+      return result(false, "identity_review_required", {
+        identity_review: review, unreviewed_candidate_ids: unreviewed,
+      });
+    if (reviewedCandidateIDs.some((id) => id !== lose.id && !candidateIDs.includes(id)))
+      return result(false, "identity_candidates_changed", { identity_review: review });
+    // Choosing this duplicate pair explicitly reviews lose; third identities
+    // require the caller's explicit review, never automatic acceptance.
+    identityReview = candidateIDs;
+  } else if (reviewedCandidateIDs.length) return result(false, "invalid_identity_review");
   const [keepRels, loseRels] = await Promise.all([
     relationsOf(keep.id),
     relationsOf(lose.id),
@@ -405,6 +448,7 @@ export async function mergeEntity({
       plannedEdgeDeletes: duplicateEdges.length,
       evidenceRequired: !evidenceValid,
       entity: { ...(await writable(currentKeep)), ...union.entity },
+      ...(identityReview !== undefined ? { reviewed_candidate_ids: identityReview } : {}),
     });
 
   try {
@@ -423,11 +467,8 @@ export async function mergeEntity({
             action: "update",
             id: keep.id,
             base_version: currentKeep.version,
-            patch: diffDocument(
-              currentKeep,
-              { ...currentKeep, ...union.entity },
-              "entity",
-            ),
+            patch,
+            ...(identityReview !== undefined ? { reviewed_candidate_ids: identityReview } : {}),
           },
         ],
       };
@@ -452,7 +493,9 @@ export async function mergeEntity({
           applied: null,
         });
       if (w.status < 200 || w.status >= 300)
-        return result(
+        return w.status === 409 && w.body?.error === "identity_candidates_changed"
+          ? result(false, "identity_candidates_changed", { identity_review: publicFailure(w).identity_review })
+          : result(
           false,
           `并集 commit HTTP ${w.status} ${w.body?.error ?? ""}`.trim(),
         );

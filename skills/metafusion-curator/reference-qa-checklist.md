@@ -21,7 +21,8 @@
 
 ## 写后回读
 
-- [ ] 写入已授权且预览已审；版本当前、未改字段保留。guarded patch：对象递归合并、数组替换、null 清空，不隐式删键。
+- [ ] 写入已授权且预览已审；版本当前、未改字段保留。工作副本按对象键生成稀疏 patch、数组替换；遗漏键保留原值并列入 `ignored_omissions`，删除使用明确 `--remove`，`null` 明确赋值。
+- [ ] 实体身份字段变动已重新查候选并提供 `--reviews`；推送后的追加编辑已完成 receipt 刷新或明确解决 `receipt_refresh_conflict`，未把待提交本地编辑当作线上事实。
 - [ ] Track 未做整实体 PUT；单条收录来源继承与其余收录保留符合 [API 契约](reference-api-behavior.md)。
 - [ ] 创建幂等键未换载荷复用；409 或结果不明先回读，不自动重放。
 - [ ] 回读实际改动、版本与当前修订（version 匹配），以及受影响 relations/occurrences；可见性裁剪部分未冒充完整验证。

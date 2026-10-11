@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { rebasePatch } from "./mf-workspace.mjs";
+import { randomUUID } from "node:crypto";
+import { identityPatch, rebasePatch } from "./mf-workspace.mjs";
 import { mergeEntity, unionInto, identityConflicts } from "./mf-lib.mjs";
 import { checkBangumi, checkMusicBrainz } from "./mf-audit-external-ids.mjs";
 
@@ -53,6 +54,10 @@ function mergeFixture(
     deleteStatus = 204,
     deleteNetworkFailure = false,
     readbackFailure = false,
+    candidateRows,
+    candidateResponse,
+    candidateStatus = 200,
+    commitStatus = 200,
   } = {},
 ) {
   const calls = [];
@@ -63,7 +68,15 @@ function mergeFixture(
     const body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ path, method, body });
     if (path.endsWith("/definitions")) return json({ etag: "defs" });
+    if (path.endsWith("/candidates")) {
+      const rows = candidateRows ?? [keep, lose].map((e) => ({ matched: e, canonical: e }));
+      return json(candidateResponse ?? { basis: "postgres_repeatable_read", total: rows.length, complete: true, items: rows }, candidateStatus);
+    }
     if (path.endsWith("/commits")) {
+      if (identityPatch(body.operations[0].patch)) assert.ok(Array.isArray(body.operations[0].reviewed_candidate_ids));
+      else assert.equal(Object.hasOwn(body.operations[0], "reviewed_candidate_ids"), false);
+      if (commitStatus !== 200) return json({ error: "identity_candidates_changed",
+        identity_review: { operation: 0, candidate_ids: [lose.id, "10000000-0000-0000-0000-000000000001"] } }, commitStatus);
       currentKeep = {
         ...rebasePatch(currentKeep, currentKeep, body.operations[0].patch)
           .working,
@@ -180,6 +193,92 @@ test("收录并集保留同一表达的不同定位并避免位置冲突", () =>
   );
   assert.equal(new Set(result.entity.contents.map((c) => c.position)).size, 2);
   assert.equal(second.position, 1);
+});
+
+test("合并身份并集复核完整候选并排除保留方 canonical aliases", async () => {
+  const keep = entity(randomUUID()),
+    lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } }),
+    alias = entity(randomUUID(), { status: "merged" });
+  const calls = mergeFixture(keep, lose, { candidateRows: [
+    { matched: keep, canonical: keep }, { matched: alias, canonical: keep }, { matched: lose, canonical: lose },
+  ] });
+  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources });
+  assert.equal(result.ok, true);
+  const query = calls.find((c) => c.path.endsWith("/candidates")).body;
+  assert.deepEqual(query.titles, ["Same", "Same"]);
+  assert.ok(query.external_ids.some((p) => p.provider === "wikidata" && p.value === "Q123"));
+  assert.deepEqual(calls.find((c) => c.path.endsWith("/commits")).body.operations[0].reviewed_candidate_ids, [lose.id]);
+});
+
+test("合并发现第三 canonical 身份默认在全部写入前停止，显式审查后可继续", async () => {
+  const keep = entity(randomUUID()),
+    lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } }),
+    other = entity(randomUUID()),
+    rows = [keep, lose, other].map((e) => ({ matched: e, canonical: e }));
+  let calls = mergeFixture(keep, lose, { candidateRows: rows });
+  const blocked = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources });
+  assert.equal(blocked.reason, "identity_review_required");
+  assert.equal(blocked.partial, false);
+  assert.deepEqual(blocked.unreviewed_candidate_ids, [other.id]);
+  assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
+  calls = mergeFixture(keep, lose, { candidateRows: rows });
+  const reviewed = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs: [other.id] });
+  assert.equal(reviewed.ok, true);
+  assert.deepEqual(calls.find((c) => c.path.endsWith("/commits")).body.operations[0].reviewed_candidate_ids, [lose.id, other.id].sort());
+});
+
+test("合并身份候选按结构归属查询；错 scope、截断、未解析或失败均禁止写入", async () => {
+  for (const [kind, scopeField] of [["expression", "work_id"], ["content_unit", "work_id"], ["medium", "release_id"], ["track", "medium_id"]]) {
+    const keep = entity(randomUUID(), { kind, [scopeField]: randomUUID() }),
+      lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_ids: { ...keep.external_ids, wikidata: "Q123" } });
+    const calls = mergeFixture(keep, lose);
+    const dry = await mergeEntity({ kind, keep, lose, sources });
+    assert.equal(dry.ok, true);
+    assert.equal(calls.find((c) => c.path.endsWith("/candidates")).body[scopeField], keep[scopeField]);
+    assert.deepEqual(dry.reviewed_candidate_ids, [lose.id]);
+    assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
+  }
+  const keep = entity(randomUUID(), { kind: "medium", release_id: randomUUID() }),
+    lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_ids: { ...keep.external_ids, wikidata: "Q123" } });
+  for (const options of [
+    { candidateRows: [{ matched: { ...lose, release_id: randomUUID() }, canonical: lose }] },
+    { candidateRows: [{ matched: lose, canonical: null }] },
+    { candidateResponse: { basis: "postgres_repeatable_read", total: 2, complete: false, items: [{ matched: lose, canonical: lose }] } },
+    { candidateResponse: { error: "rate_limited" }, candidateStatus: 429 },
+  ]) {
+    const calls = mergeFixture(keep, lose, options);
+    const result = await mergeEntity({ kind: "medium", keep, lose, dryRun: false, sources });
+    assert.equal(result.reason, "identity_review_unverified");
+    assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
+  }
+});
+
+test("并发改变候选使合并commit返回409时不删边也不执行lifecycle", async () => {
+  const keep = entity(randomUUID()),
+    lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } }),
+    edge = (id, source_id) => ({ id, source_id, target_id: "agent", type: "credit_for", attributes: {}, version: 1 });
+  const calls = mergeFixture(keep, lose, { commitStatus: 409,
+    keepRels: [edge("keep-edge", keep.id)], loseRels: [edge("lose-edge", lose.id)] });
+  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources });
+  assert.equal(result.reason, "identity_candidates_changed");
+  assert.equal(result.partial, false);
+  assert.deepEqual(result.completedSteps, []);
+  assert.ok(result.identity_review.candidate_ids.includes(lose.id));
+  assert.equal(calls.some((c) => c.method === "DELETE" || c.path.endsWith("/lifecycle")), false);
+});
+
+test("合并已审列表不能包含自身、无效ID或本次未命中的第三对象", async () => {
+  const keep = entity(randomUUID()), lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } });
+  for (const reviewedCandidateIDs of [[keep.id], ["not-a-uuid"], [lose.id, lose.id], null]) {
+    const calls = mergeFixture(keep, lose);
+    const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs });
+    assert.equal(result.reason, "invalid_identity_review");
+    assert.ok(calls.every((c) => c.method === "GET"));
+  }
+  const calls = mergeFixture(keep, lose);
+  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs: [randomUUID()] });
+  assert.equal(result.reason, "identity_candidates_changed");
+  assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
 });
 
 test("删重复关系失败后不继续 lifecycle，并明确并集已提交", async () => {

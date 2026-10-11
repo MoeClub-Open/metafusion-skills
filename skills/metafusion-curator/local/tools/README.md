@@ -19,15 +19,19 @@ node mf-source.mjs help umj.product
 node mf-platform.mjs list
 node mf-platform.mjs --plan read-plan.json --out result.json
 node mf-workspace.mjs help
-node mf-workspace.mjs init --dir ../../workspaces/agent-A
-node mf-workspace.mjs checkout --dir ../../workspaces/agent-A --entity <UUID>
-node mf-workspace.mjs commit --dir ../../workspaces/agent-A --note "核实题名" --sources sources.json
-node mf-workspace.mjs preview --dir ../../workspaces/agent-A
-node mf-workspace.mjs push --dir ../../workspaces/agent-A --apply
+node mf-workspace.mjs init --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.mjs checkout --dir "$MF_TASK_DIR/catalog" --entity <UUID>
+node mf-workspace.mjs commit --dir "$MF_TASK_DIR/catalog" --note "核实题名" --sources "$MF_TASK_DIR/sources.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
+node mf-workspace.mjs preview --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.mjs push --dir "$MF_TASK_DIR/catalog" --apply
 node mf-definitions.mjs help
 ```
 
 完整创建、依赖、冲突和恢复流程见[提交与恢复](../../reference-workflow.md)。每个 Agent 独立目录；一个工作区一个待推送提交，未知回执不换 ID。`mf-platform` 只读；旧写计划与 `mf-guarded-update` 不再保留兼容通道。
+
+`status/commit` 报告 `ignored_omissions`，遗漏对象键保留原值；删除必须明确传重复 `--remove 'entity:<UUID>:/attributes/<key>'`。身份字段更新还需 `--reviews` 文件中的 `entity:<UUID>` 数组（零候选用 `[]`）。成功推送后的追加本地编辑随回执刷新保留；`receipt_refresh_conflict` 用 `receipt --resolutions` 解决，工作文件和恢复日志在 pending 解除前必须保留。
+
+`mf-merge` 的身份并集会查询当前完整候选；所选重复对以外的 canonical 身份必须先核来源，再通过 `--reviews` 文件的 `entity:<保留方UUID>` 数组明确审查。候选结果不完整或并发变化时停止后续写入；详情见[提交与恢复](../../reference-workflow.md)。
 
 字段计划仅允许 `action: "field.create"` 新增单个受支持字段；现有同码拒绝，不能用此入口更新字段或替换整份 definitions。`list` 类型须带受支持 Field 形状的 `items`。发行定价示例模板见 [`templates/list-price-field.json`](templates/list-price-field.json)，复制后先用当前管理端 ETag 替换占位符，再预览；发行实体数据形状为 `attributes.list_price=[{amount,currency,tax_included?}]`。
 
