@@ -4,12 +4,13 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  ProviderError, PROVIDER_MATRIX, describeError, isValidIsni, looksLikeGatewayError, mapDiscogsRelease, providerAccess,
+  httpRequest, ProviderError, PROVIDER_MATRIX, describeError, isValidIsni, looksLikeGatewayError, mapDiscogsRelease, providerAccess,
   normalizeAniListId, normalizeArchiveIdentifier, normalizeDiscogsId, normalizeIsni,
   normalizeItunesCollectionId, normalizeMalId, normalizeNdlAuthorityId, normalizeOpenLibraryId, normalizeVgmdbAlbumId,
   paceConfig, openLibraryCoverUrl, parseEnglishDate, parseVgmdbAlbumHtml, runProviderOp,
@@ -21,6 +22,14 @@ import {
   fetchVgmdbAlbumViaArchive, fetchViafRecord, isniFromWikidataClaims, lookupOpenLibraryAuthor,
   listOpenLibraryEditions, lookupItunesAlbum, lookupOpenLibraryByIsbn, lookupOpenLibraryEdition, searchAniList,
   searchArchive, searchDiscogs, searchItunes, searchMyAnimeList, searchOpenLibrary, searchTmdb, waybackSnapshot,
+  // 2026-10-11 新增的五个缺口源
+  normalizeIsbn, isbnCheckDigit, openbdPubdate, lookupOpenbdByIsbn,
+  normalizeCoverArtRef, coverArtPageUrl, fetchCoverArtArchive,
+  normalizeKitsuRef, kitsuPageUrl, fetchKitsuMedia, searchKitsu,
+  normalizeVndbId, vndbReleased, vndbStripBbcode, vndbPageUrl, VNDB_FIELDS,
+  fetchVndbVn, fetchVndbReleases, fetchVndbCharacter, fetchVndbStaff, fetchVndbSchema,
+  normalizeGutenbergId, gutenbergRdfUrl, gutenbergPageUrl, parseGutenbergRdf,
+  parseGutenbergSearchHtml, fetchGutenbergEbook, searchGutenberg,
 } from "./mf-fetch-providers.mjs";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__");
@@ -282,7 +291,8 @@ test("waybackSnapshot requires a status-200 snapshot", async () => {
   const fetchImpl = stubFetch([{ match: "wayback/available", body: readJson("archive-wayback-availability-vgmdb-111949.json") }]);
   const out = await waybackSnapshot("https://vgmdb.net/album/111949", { fetchImpl });
   assert.equal(out.found, true);
-  assert.match(out.url, /web\.archive\.org\/web\/\d{14}\//);
+  assert.match(out.snapshot_url, /web\.archive\.org\/web\/\d{14}\//);
+  assert.equal(out.url, fetchImpl.calls[0].url);
   const none = stubFetch([{ match: "wayback/available", body: { archived_snapshots: {} } }]);
   const miss = await waybackSnapshot("https://vgmdb.net/album/1", { fetchImpl: none });
   assert.equal(miss.found, false);
@@ -316,7 +326,8 @@ test("fetchTmdbMedia with v4 token uses Bearer header", async () => {
   const out = await fetchTmdbMedia("1399", { apiKey: "", accessToken: "unit-test-token", fetchImpl, type: "tv" });
   assert.equal(fetchImpl.calls[0].init.headers.Authorization, "Bearer unit-test-token");
   assert.equal(out.dates.release, "2011-04-17");
-  assert.equal(out.url, "https://www.themoviedb.org/tv/1399");
+  assert.equal(out.human_page, "https://www.themoviedb.org/tv/1399");
+  assert.equal(out.url, fetchImpl.calls[0].url);
 });
 
 test("searchTmdb lists candidates with TMDB urls", async () => {
@@ -816,7 +827,8 @@ test("fetchSteamApp maps multi-language appdetails into the shared shape", async
   assert.equal(out.dates.release_raw, "Jan 25, 2018");
   assert.equal(out.dates.by_lang.schinese.normalized, "2018-01-25");
   assert.deepEqual(out.external_ids, { steam: "504230" });
-  assert.equal(out.url, "https://store.steampowered.com/app/504230/");
+  assert.equal(out.human_page, "https://store.steampowered.com/app/504230/");
+  assert.equal(out.url, fetchImpl.calls[0].url);
   assert.deepEqual(out.developers, ["Maddy Makes Games Inc.", "Extremely OK Games, Ltd."]);
   assert.deepEqual(out.genres, ["Action", "Indie"]);
   assert.equal(out.price.amount, 19.99);
@@ -879,7 +891,8 @@ test("searchSteam lists store candidates and keeps type/price for triage", async
   assert.equal(out.found, true);
   assert.equal(out.id, "504230");
   assert.equal(out.title, "Celeste");
-  assert.equal(out.url, "https://store.steampowered.com/app/504230/");
+  assert.equal(out.human_page, "https://store.steampowered.com/app/504230/");
+  assert.equal(out.url, fetchImpl.calls[0].url);
   assert.match(out.notes, /候选 2 条（total=9/);
   assert.match(out.notes, /核对 AppID、类型/);
   assert.equal(out.raw.hits[0].price.amount, 68);
@@ -893,7 +906,8 @@ test("searchSteam maps an empty result to found:false and suggests another langu
   const out = await searchSteam("まいてつ", { fetchImpl });
   assert.equal(out.found, false);
   assert.equal(out.id, null);
-  assert.equal(out.url, null);
+  assert.equal(out.human_page, null);
+  assert.equal(out.url, fetchImpl.calls[0].url);
   assert.match(out.notes, /无命中/);
   assert.match(out.notes, /lang=schinese/);
 });
@@ -1042,4 +1056,665 @@ test("listOpenLibraryEditions finds which version carries a cover", async () => 
   assert.equal(withCover[0].cover_id, "14824481");
   assert.match(withCover[0].image_url, /^https:\/\/covers\.openlibrary\.org\/b\/id\/14824481-L\.jpg$/);
   assert.match(out.notes, /有封面 /);
+});
+
+// ═════════════════════ 2026-10-11 新增五个缺口源 ═════════════════════
+// 这批断言几乎每一条都对应一个本机实测出来的坑：写死成断言，是为了下一个人改坏时测试会红，
+// 而不是靠 README 里的散文提醒。fixture 除 coverartarchive-release-index.synthetic.json 外
+// 都是 2026-10-11 真实抓取的响应（CAA 的成功载荷抓不到：archive.org 本机出现异常 DNS 解析（疑似 DNS 污染））。
+
+test("normalizeIsbn accepts both ISBN shapes and rejects junk", () => {
+  assert.equal(normalizeIsbn("9784048923514"), "9784048923514");
+  assert.equal(normalizeIsbn("978-4-04-892351-4"), "9784048923514");
+  assert.equal(normalizeIsbn("isbn: 0-306-40615-2"), "0306406152");
+  assert.equal(normalizeIsbn("080442957x"), "080442957X");
+  assert.equal(normalizeIsbn("https://api.openbd.jp/v1/get?isbn=9784048923514"), "9784048923514");
+  for (const junk of ["", "12345", "978404892351X", "abcdefghijKlm"]) {
+    assert.throws(() => normalizeIsbn(junk), (err) => err instanceof ProviderError && err.kind === "bad_input",
+      "应当拒绝：" + junk);
+  }
+  // 13 位非 978/979 开头的数字串不能被截前 10 位当成 ISBN-10。
+  assert.throws(() => normalizeIsbn("1234567890123"), (err) => err.kind === "bad_input");
+});
+
+test("isbnCheckDigit reuses the GTIN algorithm for 13 and mod-11 for 10", () => {
+  assert.deepEqual(isbnCheckDigit("9784048923514"), { scheme: "isbn-13", valid: true });
+  assert.deepEqual(isbnCheckDigit("9780000000000"), { scheme: "isbn-13", valid: false });
+  assert.deepEqual(isbnCheckDigit("0306406152"), { scheme: "isbn-10", valid: true });
+  assert.deepEqual(isbnCheckDigit("080442957X"), { scheme: "isbn-10", valid: true });
+  assert.deepEqual(isbnCheckDigit("0306406153"), { scheme: "isbn-10", valid: false });
+  assert.deepEqual(isbnCheckDigit("nope"), { scheme: null, valid: null });
+});
+
+test("openbdPubdate downgrades ONIX YYYYMM / YYYYMMDD without guessing", () => {
+  assert.equal(openbdPubdate("201612"), "2016-12");
+  assert.equal(openbdPubdate("20161210"), "2016-12-10");
+  assert.equal(openbdPubdate("2016"), "2016");
+  assert.equal(openbdPubdate("2016-12"), "2016-12");
+  assert.equal(openbdPubdate("不明"), null);
+  assert.equal(openbdPubdate(null), null);
+});
+
+test("openbd.isbn maps the real ONIX record and keeps series number away from volume", async () => {
+  const fetchImpl = stubFetch([{ match: "api.openbd.jp/v1/get", body: readJson("openbd-isbn-9784048923514.json") }]);
+  const out = await lookupOpenbdByIsbn("978-4-04-892351-4", { fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.provider, "openbd");
+  assert.equal(out.id, "9784048923514");
+  assert.equal(out.title, "僕と彼女のゲーム戦争. 10");
+  assert.equal(out.series, "電撃文庫");
+  assert.equal(out.publisher, "KADOKAWA");
+  assert.equal(out.dates.publish, "2016-12");
+  assert.equal(out.dates.publish_raw, "201612");
+  assert.deepEqual(out.authors, ["師走,トオル"]);
+  assert.deepEqual(out.isbn_checksum, { scheme: "isbn-13", valid: true });
+  assert.deepEqual(out.external_ids, { openbd: "9784048923514" });
+  // summary.volume=3159 是電撃文庫的丛书序号，不是巻号（巻号 10 只在题名里）。
+  assert.equal(out.collection_part_number, "3159");
+  assert.equal(out.volume, undefined, "不能再暴露一个叫 volume 的字段：那是丛书序号，会被当巻号写进站内");
+  assert.match(out.notes, /丛书序号/);
+  assert.match(out.notes, /不是巻号/);
+  // onix 原文要留着逐字核对，不能只给 summary。
+  assert.equal(out.onix.title_text, "僕と彼女のゲーム戦争. 10");
+  assert.equal(out.onix.collection[0].title, "電撃文庫");
+  assert.equal(out.onix.imprint, "KADOKAWA");
+  assert.equal(out.onix.prices[0].amount, "590");
+  assert.equal(out.onix.prices[0].currency, "JPY");
+  assert.match(out.notes, /PublishingDate 的 role 是 ONIX 代码/);
+});
+
+test("openbd.isbn treats [null] as not-collected and says why that is not a site failure", async () => {
+  const fetchImpl = stubFetch([{ match: "api.openbd.jp/v1/get", body: "[null]", contentType: "application/json" }]);
+  const out = await lookupOpenbdByIsbn("9780000000000", { fetchImpl });
+  assert.equal(out.found, false);
+  assert.equal(out.id, "9780000000000");
+  assert.equal(out.raw.status, 200, "查无是 HTTP 200 + [null]，不是 404");
+  assert.match(out.notes, /只收日本出版物/);
+  assert.match(out.notes, /收录范围问题/);
+  assert.match(out.notes, /校验位不通过/, "校验位不合要提示，但不拒绝查询");
+});
+
+test("openbd.isbn refuses to read a 404 as 'book does not exist'", async () => {
+  // 端点是 ?isbn= 查询参数；404 只可能是路径写错，绝不能映射成 found:false。
+  const fetchImpl = stubFetch([{ match: "api.openbd.jp", status: 404, body: "Not Found", contentType: "text/plain" }]);
+  await assert.rejects(() => lookupOpenbdByIsbn("9784048923514", { fetchImpl }), (err) => {
+    assert.ok(err instanceof ProviderError);
+    assert.equal(err.kind, "unavailable");
+    assert.equal(err.retryable, false);
+    assert.match(err.hint, /查无此书是 HTTP 200/);
+    return true;
+  });
+});
+
+test("coverArt ref parsing pins the MBID layer and refuses to guess it", () => {
+  const mbid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  assert.deepEqual(normalizeCoverArtRef(mbid, "release"), { kind: "release", id: mbid });
+  assert.deepEqual(normalizeCoverArtRef("https://coverartarchive.org/release-group/" + mbid), { kind: "release-group", id: mbid });
+  assert.deepEqual(normalizeCoverArtRef("https://musicbrainz.org/release/" + mbid, "release"), { kind: "release", id: mbid });
+  // URL 里的层级压过裸 kind：链接是证据。
+  assert.equal(normalizeCoverArtRef("https://musicbrainz.org/release/" + mbid).kind, "release");
+  // 层级冲突与层级缺失都必须报错，不能默认 release。
+  assert.throws(() => normalizeCoverArtRef("https://musicbrainz.org/release/" + mbid, "release-group"),
+    (err) => err.kind === "bad_input");
+  assert.throws(() => normalizeCoverArtRef(mbid), (err) => err.kind === "bad_input");
+  assert.throws(() => normalizeCoverArtRef("not-a-mbid", "release"), (err) => err.kind === "bad_input");
+  assert.equal(coverArtPageUrl("release-group", mbid), "https://coverartarchive.org/release-group/" + mbid);
+});
+
+test("caa maps the index and reports which release the art actually belongs to", async () => {
+  const mbid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const fetchImpl = stubFetch([{ match: "coverartarchive.org/release-group/", body: readJson("coverartarchive-release-index.synthetic.json") }]);
+  const out = await fetchCoverArtArchive(mbid, { kind: "release-group", fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.kind, "release-group");
+  assert.equal(out.images.length, 3);
+  assert.equal(out.front_count, 2, "Case Front 也被 CAA 标 front=true —— 这正是它与 Front 重复画面的原因");
+  assert.equal(out.back_count, 1);
+  assert.deepEqual(out.images[0].types, ["Front"]);
+  assert.deepEqual(out.images[2].types, ["Case Front"]);
+  assert.equal(out.images[2].approved, false);
+  assert.equal(out.images[0].thumbnails["1200"], "http://coverartarchive.org/release/" + mbid + "/3918271645-1200.jpg");
+  // release-group 请求拿到的是"选定发行版"的图，必须显式指出归属。
+  assert.equal(out.release_of_record.mbid, mbid);
+  assert.match(out.notes, /release-group 请求/);
+  assert.match(out.notes, /不得沿用上级/);
+  assert.match(out.notes, /Case Front 是正面再摄/);
+  assert.match(out.notes, /index\.json 不提供像素尺寸/);
+  assert.match(out.rights_note, /社区上传/);
+});
+
+test("caa treats the real 404 body as 'no cover art', but rejects a 404 that is not CAA's answer", async () => {
+  const mbid = "23fd33ae-3d3d-4414-b5f1-94bf374bff90";
+  const real = stubFetch([{
+    match: "coverartarchive.org/release/", status: 404,
+    body: readText("coverartarchive-no-art.html"), contentType: "text/html",
+  }]);
+  const out = await fetchCoverArtArchive(mbid, { kind: "release", fetchImpl: real });
+  assert.equal(out.found, false);
+  assert.equal(out.raw.status, 404);
+  assert.match(out.notes, /没有封面图/);
+  assert.match(out.notes, /不代表该发行版没有封面/);
+
+  // 同样是 404，但 body 不是 CAA 的措辞：按不可用处理，不许冒充"没有封面"。
+  const bogus = stubFetch([{ match: "coverartarchive.org/release/", status: 404, body: "<html>moved</html>", contentType: "text/html" }]);
+  await assert.rejects(() => fetchCoverArtArchive(mbid, { kind: "release", fetchImpl: bogus }),
+    (err) => err.kind === "unavailable" && err.retryable === true);
+});
+
+test("caa reports archive.org unreachability as retryable network failure, never as found:false", async () => {
+  // 本机 2026-10-11 实况：coverartarchive.org 200，但它 307 到的 archive.org 出现异常 DNS 解析（疑似 DNS 污染）、连接超时。
+  const fetchImpl = stubFetch([{ match: "coverartarchive.org", thenThrows: "connect ETIMEDOUT" }]);
+  await assert.rejects(
+    () => fetchCoverArtArchive("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", { kind: "release", fetchImpl }),
+    (err) => {
+      assert.ok(err instanceof ProviderError);
+      assert.equal(err.kind, "network");
+      assert.equal(err.retryable, true);
+      assert.match(err.hint, /不得当作条目不存在/);
+      return true;
+    });
+});
+
+test("kitsu ref parsing accepts id, slug and urls, and refuses cross-layer guesses", () => {
+  assert.deepEqual(normalizeKitsuRef("46474", "anime"), { kind: "anime", id: "46474", slug: null });
+  assert.deepEqual(normalizeKitsuRef("sousou-no-frieren", "anime"), { kind: "anime", id: null, slug: "sousou-no-frieren" });
+  assert.deepEqual(normalizeKitsuRef("https://kitsu.io/anime/46474"), { kind: "anime", id: "46474", slug: null });
+  assert.deepEqual(normalizeKitsuRef("https://kitsu.io/manga/sousou-no-frieren"), { kind: "manga", id: null, slug: "sousou-no-frieren" });
+  assert.throws(() => normalizeKitsuRef("https://kitsu.io/manga/46474", "anime"), (err) => err.kind === "bad_input");
+  assert.throws(() => normalizeKitsuRef("46474"), (err) => err.kind === "bad_input");
+  assert.equal(kitsuPageUrl("anime", "sousou-no-frieren"), "https://kitsu.io/anime/sousou-no-frieren");
+});
+
+test("kitsu normalizes locale keys, keeps romaji out of translations, and exposes poster dimensions", async () => {
+  const fetchImpl = stubFetch([{ match: "kitsu.io/api/edge/anime/46474", body: readJson("kitsu-anime-46474.json") }]);
+  const out = await fetchKitsuMedia("46474", { kind: "anime", fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.title, "Sousou no Frieren");
+  // ja_jp/zh_cn/ko_kr → BCP-47；en_jp 是罗马音，必须单列而不是混进译名。
+  assert.equal(out.titles["ja-JP"], "葬送のフリーレン");
+  assert.equal(out.titles["zh-CN"], "葬送的芙莉蓮");
+  assert.equal(out.titles["ko-KR"], "장송의 프리렌");
+  assert.equal(out.titles.en_jp, undefined);
+  assert.equal(out.titles["en-JP"], undefined);
+  assert.equal(out.romaji, "Sousou no Frieren");
+  assert.equal(out.dates.start, "2023-09-29");
+  assert.equal(out.dates.end, "2024-03-22");
+  assert.equal(out.episode_count, 28);
+  assert.equal(out.subtype, "TV");
+  assert.equal(out.age_rating, "PG");
+  assert.deepEqual(out.external_ids, { kitsu: "46474" });
+  assert.equal(out.human_page, "https://kitsu.io/anime/sousou-no-frieren");
+  assert.equal(out.url, fetchImpl.calls[0].url);
+  // 尺寸随 URL 一起给出：判封面门槛不必真的打开图片。
+  assert.equal(out.poster.large.short_edge, 550);
+  assert.equal(out.poster.small.short_edge, 284);
+  assert.equal(out.poster.original.url.includes("media.kitsu.app"), true);
+  assert.ok(out.cover_banner, "coverImage 要单列，它是横幅不是海报");
+  assert.match(out.notes, /Source: Crunchyroll/, "synopsis 自带的出处必须被指出来");
+  assert.match(out.notes, /聚合站/);
+  assert.match(out.notes, /不作封面候选/);
+});
+
+test("kitsu 404 is found:false only with the JSON:API error envelope", async () => {
+  const ok = stubFetch([{ match: "kitsu.io/api/edge/anime/", status: 404, body: readJson("kitsu-not-found.json") }]);
+  const out = await fetchKitsuMedia("999999999", { kind: "anime", fetchImpl: ok });
+  assert.equal(out.found, false);
+  assert.match(out.notes, /不代表作品不存在/);
+  // found:false 也要带上层级与人看的条目页：anime 与 manga 是两套独立编号，
+  // 少了 kind 就会让下游脚本把"这一层没有"读成"Kitsu 没有"。
+  assert.equal(out.kind, "anime");
+  assert.equal(out.human_page, "https://kitsu.io/anime/999999999");
+  assert.equal(out.url, ok.calls[0].url);
+  assert.equal(out.api_url.includes("/api/edge/anime/999999999"), true);
+  assert.match(out.notes, /两套独立编号/);
+
+  const bogus = stubFetch([{ match: "kitsu.io/api/edge/anime/", status: 404, body: "<html>nope</html>", contentType: "text/html" }]);
+  await assert.rejects(() => fetchKitsuMedia("999999999", { kind: "anime", fetchImpl: bogus }),
+    (err) => err.kind === "unavailable");
+});
+
+test("kitsu search returns candidates and routes slug lookups through filter[slug]", async () => {
+  const fetchImpl = stubFetch([{ match: "filter%5Btext%5D", body: readJson("kitsu-search.json") }]);
+  const out = await searchKitsu("sousou no frieren", { kind: "anime", limit: 5, fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.raw.count, 6);
+  assert.equal(out.raw.hits.length, 3);
+  assert.equal(out.raw.hits[0].id, "46474");
+  assert.equal(out.raw.hits[0].titles_zh, "葬送的芙莉蓮");
+  assert.match(out.notes, /候选/);
+
+  const single = readJson("kitsu-anime-46474.json");
+  const bySlug = stubFetch([{ match: "filter%5Bslug%5D", body: { data: [single.data] } }]);
+  const slugOut = await fetchKitsuMedia("sousou-no-frieren", { kind: "anime", fetchImpl: bySlug });
+  assert.equal(slugOut.found, true);
+  assert.equal(bySlug.calls[0].url.includes("filter%5Bslug%5D=sousou-no-frieren"), true);
+});
+
+test("vndb id parsing keeps the four layers apart", () => {
+  assert.equal(normalizeVndbId("v17", "vn"), "v17");
+  assert.equal(normalizeVndbId("17", "vn"), "v17");
+  assert.equal(normalizeVndbId("https://vndb.org/v17", "vn"), "v17");
+  assert.equal(normalizeVndbId("c17", "character"), "c17");
+  assert.equal(normalizeVndbId("s17", "staff"), "s17");
+  assert.equal(normalizeVndbId("r196", "release"), "r196");
+  assert.throws(() => normalizeVndbId("c17", "vn"), (err) => err.kind === "bad_input");
+  assert.throws(() => normalizeVndbId("https://vndb.org/r12", "vn"), (err) => err.kind === "bad_input");
+  assert.equal(vndbPageUrl("vn", "v17"), "https://vndb.org/v17");
+});
+
+test("vndbReleased honours the 00-means-unknown convention", () => {
+  assert.equal(vndbReleased("2003-05-16"), "2003-05-16");
+  assert.equal(vndbReleased("2003-05-00"), "2003-05");
+  assert.equal(vndbReleased("2003-00-00"), "2003");
+  assert.equal(vndbReleased(null), null);
+  assert.equal(vndbReleased(""), null);
+  assert.equal(vndbReleased("TBA"), null);
+});
+
+test("vndbStripBbcode unwraps markup but keeps the provenance words", () => {
+  // 外层方括号是 VNDB 原文的字面括号，不是标签：机械去标签的结果要忠实保留它，
+  // 因为「From Wikipedia」正是简介的出处线索，吃掉它就等于毁掉证据。
+  assert.equal(vndbStripBbcode("[From [url=http://en.wikipedia.org/wiki/Ever_17]Wikipedia[/url]]"), "[From Wikipedia]");
+  assert.equal(vndbStripBbcode("[spoiler]he dies[/spoiler]"), "he dies");
+  assert.equal(vndbStripBbcode("[b]bold[/b] and [i]italic[/i]"), "bold and italic");
+  assert.equal(vndbStripBbcode("[quote=yorhel]text[/quote]"), "text");
+  assert.equal(vndbStripBbcode("plain [not a tag] prose"), "plain [not a tag] prose");
+  assert.equal(vndbStripBbcode("   "), null);
+  assert.equal(vndbStripBbcode(null), null);
+});
+
+test("vndb.vn maps the real record including the Chinese title variants", async () => {
+  const fetchImpl = stubFetch([{ match: "api.vndb.org/kana/vn", body: readJson("vndb-vn-17.json") }]);
+  const out = await fetchVndbVn("v17", { fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.id, "v17");
+  assert.equal(out.title, "Ever17 -the out of infinity-");
+  assert.equal(out.titles["zh-Hans"].title, "时空轮回");
+  assert.equal(out.titles["zh-Hant"].title, "時光的羈絆");
+  assert.equal(out.titles.ja.main, true);
+  assert.equal(out.dates.release, "2002-08-29");
+  assert.deepEqual(out.external_ids, { vndb: "v17" });
+  assert.ok(out.languages.includes("zh-Hans"));
+  assert.match(out.description_text, /LeMU/);
+  assert.ok(!out.description_text.includes("[url="), "纯文本里不应残留 BBCode");
+  assert.ok(out.raw.description.includes("[url="), "原文必须留在 raw 里供逐字核对");
+  assert.match(out.notes, /BBCode/);
+  // 请求体必须带 results 而不是 count，字段清单必须来自核过的 VNDB_FIELDS。
+  const body = JSON.parse(fetchImpl.calls[0].body);
+  assert.equal(body.results, 1);
+  assert.equal(body.count, undefined);
+  assert.deepEqual(body.filters, ["id", "=", "v17"]);
+  assert.equal(body.fields, VNDB_FIELDS.vn);
+});
+
+test("vndb.releases surfaces catalogue number, barcode, media and the publisher/developer split", async () => {
+  const fetchImpl = stubFetch([{ match: "api.vndb.org/kana/release", body: readJson("vndb-releases-vn17.json") }]);
+  const out = await fetchVndbReleases("v17", { fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.release_count, 3);
+  const en = out.releases.find((r) => r.id === "r12");
+  assert.equal(en.catalog_number, "HI-APPC002");
+  assert.equal(en.gtin, "820170101013");
+  assert.equal(en.gtin_scheme, "upc-a");
+  assert.equal(en.gtin_checksum_valid, true);
+  assert.deepEqual(en.media, [{ medium: "cd", qty: 4 }]);
+  assert.equal(en.minage, 13);
+  assert.equal(en.released, "2005-12-20");
+  assert.deepEqual(en.producers, [{ id: "p9", name: "Hirameki International", developer: false, publisher: true }]);
+  const jp = out.releases.find((r) => r.id === "r196");
+  assert.deepEqual(jp.producers, [{ id: "p8", name: "KID", developer: true, publisher: true }]);
+  assert.equal(jp.languages[0].lang, "ja");
+  assert.match(out.notes, /publisher=true 才是发行方/);
+  assert.match(out.notes, /不等于站内 content_rating 词表/);
+  const body = JSON.parse(fetchImpl.calls[0].body);
+  assert.deepEqual(body.filters, ["vn", "=", ["id", "=", "v17"]]);
+});
+
+test("vndb.character and vndb.staff keep transcription apart from the original script", async () => {
+  const ch = stubFetch([{ match: "api.vndb.org/kana/character", body: readJson("vndb-character-17.json") }]);
+  const c = await fetchVndbCharacter("c17", { fetchImpl: ch });
+  assert.equal(c.found, true);
+  assert.equal(c.title, "Tortinita Fine");
+  assert.equal(c.original_name, "トルティニタ・フィーネ");
+  assert.deepEqual(c.external_ids, { vndb_character: "c17" });
+  assert.deepEqual(c.image_meta.dims, [256, 300], "短边 256 低于站内 300 门槛，dims 必须给出以便先量再写");
+  assert.equal(c.appears_in[0].title, "Symphonic Rain");
+  assert.equal(c.appears_in[0].role, "primary");
+  assert.equal(c.appears_in[0].release, undefined, "vns.release 是嵌套对象，不取就不会有半截数据");
+  assert.match(c.notes, /别把转写当原文/);
+
+  const st = stubFetch([{ match: "api.vndb.org/kana/staff", body: readJson("vndb-staff-17.json") }]);
+  const s = await fetchVndbStaff("s17", { fetchImpl: st });
+  assert.equal(s.found, true);
+  assert.equal(s.title, "Ueda Kana");
+  assert.deepEqual(s.external_ids, { vndb_staff: "s17" });
+  assert.ok(Array.isArray(s.aliases));
+  assert.match(s.notes, /没有生日字段/);
+});
+
+test("vndb turns a 400 field complaint into an actionable bad_input instead of a dead end", async () => {
+  const fetchImpl = stubFetch([{
+    match: "api.vndb.org/kana/vn", status: 400,
+    body: readText("vndb-bad-fields.txt"), contentType: "text/plain",
+  }]);
+  await assert.rejects(() => fetchVndbVn("v17", { fetchImpl }), (err) => {
+    assert.ok(err instanceof ProviderError);
+    assert.equal(err.kind, "bad_input");
+    assert.equal(err.retryable, false);
+    assert.match(err.message, /original/);
+    assert.match(err.hint, /vndb\.schema/);
+    assert.match(err.hint, /results 不是 count/);
+    return true;
+  });
+});
+
+test("vndb.schema exposes the authoritative field names per endpoint", async () => {
+  const fetchImpl = stubFetch([{ match: "api.vndb.org/kana/schema", body: readJson("vndb-schema.json") }]);
+  const out = await fetchVndbSchema("-", { fetchImpl });
+  assert.equal(out.found, true);
+  assert.deepEqual(out.endpoints, ["/character", "/producer", "/quote", "/release", "/staff", "/tag", "/trait", "/ulist", "/vn"]);
+  assert.ok(out.fields["/vn"].includes("title"));
+  assert.ok(out.enums.length > 0);
+  assert.match(out.notes, /必须显式给子字段/);
+  assert.match(out.notes, /results 不是 count/);
+});
+
+// 这条是防回归的关键：VNDB 的 fields 是严格校验的，写错字段名或漏给嵌套子字段就是 HTTP 400。
+// 用真实 schema 逐字段核对本连接器实际发送的 VNDB_FIELDS，等于把"字段名靠试错"这条路封死。
+test("every field VNDB_FIELDS sends exists in the live API schema, including nested sub-fields", () => {
+  const schema = readJson("vndb-schema.json").api_fields;
+  const resolve = (endpoint, root) => {
+    const node = schema[endpoint] && schema[endpoint][root];
+    if (!node || typeof node !== "object") return node === undefined ? null : "scalar";
+    if (node._inherit) {
+      const inherited = schema[node._inherit] || {};
+      return Object.assign({}, inherited, node);
+    }
+    return node;
+  };
+  for (const [kind, endpoint] of [["vn", "/vn"], ["release", "/release"], ["character", "/character"], ["staff", "/staff"]]) {
+    for (const field of VNDB_FIELDS[kind].split(",")) {
+      const [root, sub] = field.split(".");
+      assert.ok(root in schema[endpoint], `${kind}: schema 里没有根字段 ${root}（field=${field}）`);
+      if (!sub) continue;
+      const node = resolve(endpoint, root);
+      assert.ok(node && typeof node === "object", `${kind}: ${root} 不是对象，却请求了子字段 ${sub}`);
+      assert.ok(sub in node, `${kind}: ${root} 没有子字段 ${sub}（可用：${Object.keys(node).join(",")}）`);
+    }
+  }
+  // 反向守卫：分页参数必须是 results。连接器发出的请求体由 vndbPost 构造，这里锁死字段清单不含 count。
+  assert.ok(!Object.values(VNDB_FIELDS).some((fields) => /(?:^|,)\s*count\b/.test(fields)));
+});
+
+test("vndb empty result set is found:false, not an error", async () => {
+  const fetchImpl = stubFetch([{ match: "api.vndb.org/kana/vn", body: { more: false, results: [] } }]);
+  const out = await fetchVndbVn("v99999999", { fetchImpl });
+  assert.equal(out.found, false);
+  assert.match(out.notes, /不代表作品不存在/);
+});
+
+test("gutenberg id parsing accepts bare ids and every page-url variant", () => {
+  assert.equal(normalizeGutenbergId("1513"), "1513");
+  assert.equal(normalizeGutenbergId("https://www.gutenberg.org/ebooks/1513"), "1513");
+  assert.equal(normalizeGutenbergId("https://www.gutenberg.org/ebooks/1513.html.images"), "1513");
+  assert.equal(normalizeGutenbergId("https://www.gutenberg.org/cache/epub/1513/pg1513.rdf"), "1513");
+  for (const junk of ["", "abc", "0", "https://www.gutenberg.org/ebooks/"]) {
+    assert.throws(() => normalizeGutenbergId(junk), (err) => err.kind === "bad_input");
+  }
+  assert.equal(gutenbergRdfUrl("1513"), "https://www.gutenberg.org/cache/epub/1513/pg1513.rdf");
+  assert.equal(gutenbergPageUrl("1513"), "https://www.gutenberg.org/ebooks/1513");
+});
+
+test("gutenberg RDF parsing yields the reliable issued date and inverted author names", () => {
+  const record = parseGutenbergRdf(readText("gutenberg-1513.rdf"), "1513");
+  assert.equal(record.id, "1513");
+  assert.equal(record.title, "Romeo and Juliet");
+  assert.equal(record.issued, "1998-11-01");
+  assert.equal(record.publisher, "Project Gutenberg");
+  assert.equal(record.rights, "Public domain in the USA.");
+  assert.deepEqual(record.languages, ["en"]);
+  assert.equal(record.creators.length, 1);
+  assert.equal(record.creators[0].name, "Shakespeare, William");
+  assert.equal(record.creators[0].birthdate, "1564");
+  assert.equal(record.creators[0].deathdate, "1616");
+  assert.deepEqual(record.creators[0].aliases, ["Shakspeare, William", "Shakspere, William"]);
+  assert.equal(record.creators[0].webpage, "https://en.wikipedia.org/wiki/William_Shakespeare");
+  assert.equal(record.creators[0].agent_url, "https://www.gutenberg.org/2009/agents/65");
+  assert.ok(record.subjects.length >= 2);
+  assert.equal(record.subjects[0].scheme, "LCSH");
+  assert.equal(record.subjects[0].value, "Vendetta -- Drama");
+  assert.ok(record.bookshelves.includes("Category: Romance"));
+  assert.ok(record.formats.length >= 1);
+  assert.match(record.formats[0].url, /^https:\/\/www\.gutenberg\.org\/ebooks\/1513\./);
+});
+
+test("gutenberg refuses to map a record whose id does not match the request", () => {
+  // 身份不符必须抛，不能按错 id 写进站内。
+  assert.throws(() => parseGutenbergRdf(readText("gutenberg-1513.rdf"), "9999"),
+    (err) => err.kind === "parse" && /不一致/.test(err.message));
+  assert.throws(() => parseGutenbergRdf("<html>not rdf</html>", "1513"), (err) => err.kind === "parse");
+});
+
+test("gutenberg.ebook warns about the crossed RDFa attributes on the HTML page", async () => {
+  const fetchImpl = stubFetch([{
+    match: "pg1513.rdf", body: readText("gutenberg-1513.rdf"), contentType: "application/rdf+xml",
+  }]);
+  const out = await fetchGutenbergEbook("1513", { fetchImpl });
+  assert.equal(out.found, true);
+  assert.equal(out.title, "Romeo and Juliet");
+  assert.equal(out.dates.release, "1998-11-01");
+  assert.deepEqual(out.external_ids, { gutenberg: "1513" });
+  assert.equal(out.human_page, "https://www.gutenberg.org/ebooks/1513");
+  assert.equal(out.url, fetchImpl.calls[0].url);
+  assert.equal(out.publisher, "Project Gutenberg");
+  assert.match(out.notes, /交叉错位/);
+  assert.match(out.notes, /倒装形/);
+  assert.match(out.notes, /Work 层身份要另找一手来源/);
+  assert.match(out.rights_note, /只覆盖美国公版/);
+  assert.equal(out.cover_candidates.medium, "https://www.gutenberg.org/cache/epub/1513/pg1513.cover.medium.jpg");
+});
+
+test("gutenberg.ebook 404 is a real answer, and search results are only candidates", async () => {
+  const miss = stubFetch([{ match: "pg9999999.rdf", status: 404, body: "Not Found", contentType: "text/plain" }]);
+  const out = await fetchGutenbergEbook("9999999", { fetchImpl: miss });
+  assert.equal(out.found, false);
+  assert.match(out.notes, /不代表作品本身不存在/);
+
+  const search = stubFetch([{
+    match: "ebooks/search/", body: readText("gutenberg-search.html"), contentType: "text/html",
+  }]);
+  const hits = await searchGutenberg("shakespeare romeo", { fetchImpl: search });
+  assert.equal(hits.found, true);
+  assert.equal(hits.raw.hits[0].id, "1513");
+  assert.equal(hits.raw.hits[0].title, "Romeo and Juliet");
+  assert.equal(hits.raw.hits[0].author, "William Shakespeare");
+  assert.match(hits.raw.hits[0].extra, /downloads/);
+  assert.equal(hits.raw.hits[0].cover_thumb, "https://www.gutenberg.org/cache/epub/1513/pg1513.cover.small.jpg");
+  assert.match(hits.notes, /同名异书/);
+  assert.match(hits.notes, /必须逐条用 gutenberg\.ebook 取 RDF 核对/);
+});
+
+test("parseGutenbergSearchHtml tolerates a page with no booklink rows", () => {
+  assert.deepEqual(parseGutenbergSearchHtml("<html><body>nothing</body></html>"), []);
+  assert.deepEqual(parseGutenbergSearchHtml(""), []);
+  assert.deepEqual(parseGutenbergSearchHtml(null), []);
+});
+
+test("the five new providers are in the matrix with anonymous access and a verifiedAt snapshot", () => {
+  for (const provider of ["coverartarchive", "kitsu", "vndb", "openbd", "gutenberg"]) {
+    const entry = PROVIDER_MATRIX[provider];
+    assert.ok(entry, provider + " missing from PROVIDER_MATRIX");
+    assert.equal(entry.access, "anonymous", provider + " must not need credentials");
+    assert.equal(entry.verifiedAt, "2026-10-11", provider + " must carry today's verification date");
+    assert.ok(entry.note.length > 200, provider + " note must carry the verified traps, not a one-liner");
+    assert.ok(entry.rateLimit && entry.rateLimit.length > 0);
+    assert.ok(/^https:\/\//.test(entry.baseUrl));
+    assert.equal(entry.accessObservation.scope, "snapshot");
+  }
+  // archive.org 今天不可达这件事必须写在 internetarchive 行里，否则依赖它的三个操作会被误判成"来源没数据"。
+  assert.match(PROVIDER_MATRIX.internetarchive.note, /2026-10-11 本机复测/);
+  assert.match(PROVIDER_MATRIX.internetarchive.note, /解析异常/);
+  assert.match(PROVIDER_MATRIX.coverartarchive.note, /archive\.org/);
+  assert.match(PROVIDER_MATRIX.openbd.note, /59MB/);
+});
+
+test("evidence hashes exact response bytes and records the final read URL after redirects", async () => {
+  const bytes = Uint8Array.from([0xef, 0xbb, 0xbf, 0x7b, 0x7d, 0xff]);
+  const requested = "https://example.org/index";
+  const finalUrl = "https://cdn.example.org/index.json";
+  const response = new Response(bytes, { status: 200 });
+  Object.defineProperty(response, "url", { value: finalUrl });
+  const out = await httpRequest(requested, { fetchImpl: async () => response });
+  assert.equal(out.url, finalUrl);
+  assert.equal(out.request_url, requested);
+  assert.equal(out.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.notEqual(out.sha256, createHash("sha256").update(out.text).digest("hex"), "解码会丢失 BOM 或无效 UTF-8，不能用 text 重算原字节摘要");
+  assert.equal(out.response_byte_length, bytes.length);
+});
+
+test("all new connector success, miss and search evidence URLs describe only actual reads", async () => {
+  const cases = [
+    ["kitsu.anime", "46474", readJson("kitsu-anime-46474.json"), 200],
+    ["kitsu.anime", "999999999", readJson("kitsu-not-found.json"), 404],
+    ["kitsu.anime", "missing-slug", { data: [] }, 200],
+    ["kitsu.search", "frieren", readJson("kitsu-search.json"), 200],
+    ["kitsu.search", "none", { data: [], meta: { count: 0 } }, 200],
+    ["vndb.vn", "v17", readJson("vndb-vn-17.json"), 200],
+    ["vndb.vn", "v999", { more: false, results: [] }, 200],
+    ["vndb.releases", "v17", readJson("vndb-releases-vn17.json"), 200],
+    ["vndb.releases", "v999", { more: false, results: [] }, 200],
+    ["vndb.character", "c17", readJson("vndb-character-17.json"), 200],
+    ["vndb.staff", "s17", readJson("vndb-staff-17.json"), 200],
+    ["gutenberg.ebook", "1513", readText("gutenberg-1513.rdf"), 200],
+    ["gutenberg.ebook", "9999", "Not Found", 404],
+    ["gutenberg.search", "romeo", readText("gutenberg-search.html"), 200],
+    ["gutenberg.search", "none", '<html><head><meta name="totalResults" content="0"></head><body>No books</body></html>', 200],
+    ["openbd.isbn", "9784048923514", readJson("openbd-isbn-9784048923514.json"), 200],
+    ["openbd.isbn", "9784048923514", [null], 200],
+  ];
+  for (const [op, arg, body, status] of cases) {
+    const serializedBody = typeof body === "string" ? body : JSON.stringify(body);
+    const fetchImpl = stubFetch([{ match: /./, body: serializedBody, status }]);
+    const out = await runProviderOp(op, arg, { fetchImpl });
+    assert.equal(fetchImpl.calls.length, 1, op);
+    assert.equal(out.url, fetchImpl.calls[0].url, op);
+    assert.equal(out.sha256, createHash("sha256").update(serializedBody).digest("hex"), op);
+    assert.equal(out.request_method, op.startsWith("vndb.") ? "POST" : "GET", op);
+    assert.equal(out.http_status, status, op);
+    if (out.human_page) assert.notEqual(out.url, out.human_page, op);
+  }
+});
+
+test("TMDB successful evidence redacts query credentials without discarding byte hashes", async () => {
+  const key = "credential-must-not-appear";
+  const fetchImpl = stubFetch([{ match: "/movie/550", body: readJson("tmdb-movie.synthetic.json") }]);
+  const out = await fetchTmdbMedia("550", { apiKey: key, accessToken: "", fetchImpl });
+  assert.equal(out.url_redacted, true);
+  assert.match(out.url, /api_key=\[REDACTED\]/);
+  assert.equal(JSON.stringify(out).includes(key), false);
+  assert.match(out.sha256, /^[a-f0-9]{64}$/);
+});
+
+test("CAA back-only art remains listed without being promoted to a front candidate", async () => {
+  const body = readJson("coverartarchive-release-index.synthetic.json");
+  body.images = body.images.filter((image) => image.back);
+  const out = await fetchCoverArtArchive("23fd33ae-3d3d-4414-b5f1-94bf374bff90", { kind: "release", fetchImpl: stubFetch([{ match: /./, body }]) });
+  assert.equal(out.found, true);
+  assert.equal(out.images.length, 1);
+  assert.equal(out.front_count, 0);
+  assert.equal(out.image_url, null);
+});
+
+test("Gutenberg only exposes covers explicitly listed by the fetched RDF", async () => {
+  const rdf = readText("gutenberg-1513.rdf");
+  const withoutCovers = rdf.replace(/<dcterms:hasFormat>[\s\S]*?<\/dcterms:hasFormat>/g, block => /image\/jpeg/.test(block) ? "" : block);
+  const missing = await fetchGutenbergEbook("1513", { fetchImpl: stubFetch([{ match: /./, body: withoutCovers }]) });
+  assert.equal(missing.image_url, null);
+  assert.equal(missing.cover_candidates.medium, null);
+  assert.deepEqual(missing.cover_candidates.rdf_formats, []);
+  const declaredUrl = "https://www.gutenberg.org/files/1513/edition.cover.medium.jpg";
+  const changed = rdf.replace("https://www.gutenberg.org/cache/epub/1513/pg1513.cover.medium.jpg", declaredUrl);
+  const found = await fetchGutenbergEbook("1513", { fetchImpl: stubFetch([{ match: /./, body: changed }]) });
+  assert.equal(found.image_url, declaredUrl);
+  assert.equal(found.cover_candidates.medium, declaredUrl);
+});
+
+test("Kitsu rejects malformed, mismatched and ambiguous detail identities", async () => {
+  const valid = readJson("kitsu-anime-46474.json").data;
+  const cases = [
+    ["46474", {}],
+    ["46474", { data: null }],
+    ["46474", { data: { ...valid, id: "46475" } }],
+    ["46474", { data: { ...valid, type: "manga" } }],
+    ["46474", { data: { ...valid, attributes: [] } }],
+    ["sousou-no-frieren", { data: [null] }],
+    ["sousou-no-frieren", { data: [valid, valid] }],
+    ["sousou-no-frieren", { data: [{ ...valid, attributes: { ...valid.attributes, slug: "other" } }] }],
+  ];
+  for (const [arg, body] of cases) {
+    await assert.rejects(() => fetchKitsuMedia(arg, { kind: "anime", fetchImpl: stubFetch([{ match: /./, body }]) }),
+      err => err.kind === "parse", arg + ": " + JSON.stringify(body));
+  }
+});
+
+test("Kitsu collection 404 is unknown and wrong-layer search candidates are rejected", async () => {
+  const missing = () => stubFetch([{ match: /./, status: 404, body: readJson("kitsu-not-found.json") }]);
+  await assert.rejects(() => searchKitsu("none", { fetchImpl: missing() }), err => err.kind === "unavailable");
+  await assert.rejects(() => fetchKitsuMedia("missing-slug", { kind: "anime", fetchImpl: missing() }), err => err.kind === "unavailable");
+  const row = readJson("kitsu-anime-46474.json").data;
+  await assert.rejects(() => searchKitsu("frieren", { kind: "anime", fetchImpl: stubFetch([{ match: /./, body: { data: [{ ...row, type: "manga" }] } }]) }),
+    err => err.kind === "parse");
+});
+
+test("VNDB details verify the returned id and require a known result-set shape", async () => {
+  for (const [fetchRecord, id, fixture] of [
+    [fetchVndbVn, "v17", "vndb-vn-17.json"],
+    [fetchVndbCharacter, "c17", "vndb-character-17.json"],
+    [fetchVndbStaff, "s17", "vndb-staff-17.json"],
+  ]) {
+    for (const row of [{}, { ...readJson(fixture).results[0], id: id.slice(0, 1) + "18" }]) {
+      await assert.rejects(() => fetchRecord(id, { fetchImpl: stubFetch([{ match: /./, body: { more: false, results: [row] } }]) }),
+        err => err.kind === "parse", id);
+    }
+  }
+  await assert.rejects(() => fetchVndbVn("v17", { fetchImpl: stubFetch([{ match: /./, body: { results: [] } }]) }), err => err.kind === "parse");
+  await assert.rejects(() => fetchVndbVn("v17", { fetchImpl: stubFetch([{ match: /./, status: 404, body: { more: false, results: [] } }]) }),
+    err => err.kind === "unavailable");
+  await assert.rejects(() => fetchVndbSchema("-", { fetchImpl: stubFetch([{ match: /./, status: 404, body: readJson("vndb-schema.json") }]) }),
+    err => err.kind === "unavailable");
+});
+
+test("VNDB releases reject a missing id or a record from another VN", async () => {
+  for (const mutate of [row => { delete row.id; }, row => { row.vns = [{ id: "v18" }]; }]) {
+    const body = readJson("vndb-releases-vn17.json");
+    mutate(body.results[0]);
+    await assert.rejects(() => fetchVndbReleases("v17", { fetchImpl: stubFetch([{ match: /./, body }]) }), err => err.kind === "parse");
+  }
+});
+
+test("OpenBD accepts only a single explicit result and checks all ISBN anchors", async () => {
+  const valid = readJson("openbd-isbn-9784048923514.json")[0];
+  for (const body of [[], [null, null], [{}], [{ ...valid, summary: { ...valid.summary, isbn: "9780000000000" } }],
+    [{ ...valid, onix: { ...valid.onix, ProductIdentifier: [{ ProductIDType: "15", IDValue: "9780000000000" }] } }]]) {
+    await assert.rejects(() => lookupOpenbdByIsbn("9784048923514", { fetchImpl: stubFetch([{ match: /./, body }]) }),
+      err => err.kind === "parse");
+  }
+  const equivalent = await lookupOpenbdByIsbn("4048923514", { fetchImpl: stubFetch([{ match: /./, body: [valid] }]) });
+  assert.equal(equivalent.found, true, "ISBN-10 查询应接受同一本书的 ISBN-13 响应");
+  assert.equal(equivalent.isbn_checksum.scheme, "isbn-10");
+});
+
+test("Gutenberg requires an explicit ebook identity instead of borrowing the requested id", () => {
+  const rdf = readText("gutenberg-1513.rdf");
+  assert.throws(() => parseGutenbergRdf(rdf.replace('rdf:about="ebooks/1513"', ''), "1513"), err => err.kind === "parse");
+  assert.throws(() => parseGutenbergRdf(rdf.replace('rdf:about="ebooks/1513"', 'rdf:about="other/1513"'), "1513"), err => err.kind === "parse");
+  assert.equal(parseGutenbergRdf(rdf.replace('rdf:about="ebooks/1513"', 'rdf:about="https://www.gutenberg.org/ebooks/1513"'), "1513").id, "1513");
+});
+
+test("Gutenberg search refuses an unavailable or unrecognized result page", async () => {
+  await assert.rejects(() => searchGutenberg("romeo", { fetchImpl: stubFetch([{ match: /./, status: 404, body: "Not Found" }]) }),
+    err => err.kind === "unavailable");
+  for (const body of ['<html>unknown</html>', '<meta name="totalResults" content="1">']) {
+    await assert.rejects(() => searchGutenberg("romeo", { fetchImpl: stubFetch([{ match: /./, body }]) }), err => err.kind === "parse");
+  }
 });

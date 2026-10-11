@@ -2,7 +2,9 @@
 //
 // 定位：mf-fetch-authoritative.mjs 已覆盖 Wikidata / Bangumi / MusicBrainz / UMJ 官方商品页。
 // 本模块补齐常见编目外链的其他提供方：Discogs、Open Library、Internet Archive、TMDB、
-// AniList、MyAnimeList、ISNI / VIAF / OCLC、NDL Linked Data、VGMdb。
+// AniList、MyAnimeList、ISNI / VIAF / OCLC、NDL Linked Data、VGMdb、iTunes Store、Steam，
+// 以及 2026-10-11 新增的五个缺口源：Cover Art Archive（音乐封面）、Kitsu（动画/漫画）、
+// VNDB（视觉小说，含版次品番/条码/载体）、OpenBD（日本出版物书目）、Project Gutenberg（公版电子书）。
 // 全部只读：不读 MetaFusion 凭据、不写任何线上数据，也不向外部站点携带站内凭据。
 //
 // 三条硬约定（与 COMMON-BRIEF 的权威来源口径一致，踩过坑才写进代码）：
@@ -16,7 +18,7 @@
 //
 // 出参形状（所有 connector 一致，便于上层统一处理）：
 //   { provider, found, id, title, titles?, image_url, image_page_url?, dates?, external_ids?,
-//     url, raw, notes?, rights_note?, tracks? }
+//     url, sha256, request_url, request_method, human_page?, evidence_reads, raw, notes?, rights_note?, tracks? }
 // raw 保留提供方原始响应，便于逐字核对；本模块不替调用方判断"是不是同一个对象"，
 // 写入前仍须按 COMMON-BRIEF 第 2 条做三重核对。
 //
@@ -24,6 +26,9 @@
 //   import { fetchDiscogsRelease, searchOpenLibrary, PROVIDER_MATRIX } from "./mf-fetch-providers.mjs";
 //   const r = await fetchDiscogsRelease("https://www.discogs.com/release/2879-Daft-Punk-Discovery");
 // CLI：node mf-fetch-providers.mjs <op> <参数>   （op 见文件末尾 PROVIDER_OPS）
+
+import { createHash } from "node:crypto";
+import { sourceQualification } from "./mf-source-qualification.mjs";
 
 export const USER_AGENT = "MetaFusion-Curator/1.0 ( +https://findverse.cc ; contact: admin@findverse.cc )";
 
@@ -157,8 +162,10 @@ export async function httpRequest(url, opts) {
       }
 
       let text = "";
+      let bytes;
       try {
-        text = await res.text();
+        bytes = Buffer.from(await res.arrayBuffer());
+        text = new TextDecoder().decode(bytes);
       } catch (err) {
         lastFailure = new ProviderError("network", provider, "响应体读取失败：" + (err && err.message ? err.message : String(err)), { url: url, cause: err });
         if (attempt < attempts) { await delay(paceConfig.backoffBaseMs * attempt); continue; }
@@ -167,6 +174,17 @@ export async function httpRequest(url, opts) {
       const contentType = res.headers && res.headers.get ? res.headers.get("content-type") || "" : "";
       const retryAfter = res.headers && res.headers.get ? res.headers.get("retry-after") : null;
       const status = res.status;
+      const finalUrl = res.url || url;
+      const read = {
+        url: redactCredentialText(finalUrl),
+        request_url: redactCredentialText(url),
+        request_method: method,
+        url_redacted: redactCredentialText(finalUrl) !== finalUrl || redactCredentialText(url) !== url,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        response_byte_length: bytes.length,
+        retrieved_at: new Date().toISOString(),
+        ...(o.body == null ? {} : { request_body_sha256: createHash("sha256").update(o.body).digest("hex") }),
+      };
 
       if (status === 404 || status === 410) {
         if (looksLikeGatewayError(text) || looksLikeBotChallenge(text)) {
@@ -174,7 +192,7 @@ export async function httpRequest(url, opts) {
             "HTTP " + status + " 返回的是网关 / 反爬页，而不是提供方的「不存在」答复",
             { status: status, url: url, retryable: true, hint: "该提供方当前不可用；按矩阵换读取路径" });
         }
-        return { status: status, text: text, contentType: contentType, headers: res.headers, notFound: true, url: url };
+        return { status, text, contentType, headers: res.headers, notFound: true, ...read };
       }
 
       if (status === 429 || status === 503) {
@@ -224,7 +242,7 @@ export async function httpRequest(url, opts) {
           { status: status, url: url, retryable: true });
       }
 
-      return { status: status, text: text, contentType: contentType, headers: res.headers, notFound: false, url: url };
+      return { status, text, contentType, headers: res.headers, notFound: false, ...read };
     }
     throw lastFailure ?? new ProviderError("network", provider, "未预期的读取失败（状态未知）", { url: url });
   });
@@ -234,9 +252,9 @@ export async function httpRequest(url, opts) {
 export async function jsonRequest(url, opts) {
   const o = opts || {};
   const res = await httpRequest(url, Object.assign({ accept: "application/json" }, o));
-  if (res.notFound) return { notFound: true, status: res.status, json: null, raw: res.text, url: res.url };
+  if (res.notFound) return { ...res, json: null, raw: res.text };
   try {
-    return { notFound: false, status: res.status, json: JSON.parse(res.text), raw: res.text, url: res.url };
+    return { ...res, json: JSON.parse(res.text), raw: res.text };
   } catch (err) {
     throw new ProviderError("parse", o.provider ?? "unknown",
       "响应不是合法 JSON（content-type=" + (res.contentType || "?") + "）：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
@@ -248,6 +266,7 @@ export async function jsonRequest(url, opts) {
 function result(provider, fields) {
   return Object.assign({
     provider: provider,
+    source_qualification: sourceQualification(provider),
     found: true,
     id: null,
     title: null,
@@ -261,6 +280,22 @@ function result(provider, fields) {
     notes: null,
     rights_note: null,
   }, fields || {});
+}
+
+/** 只将已完成读取的响应作为证据；纯 map/parse 的页面链接不冒充实读。 */
+export function attachReadEvidence(output, responses) {
+  const reads = (Array.isArray(responses) ? responses : [responses]).filter(Boolean).map((response) => {
+    const keys = ["url", "request_url", "request_method", "url_redacted", "sha256", "response_byte_length", "retrieved_at", "request_body_sha256"];
+    return { ...Object.fromEntries(keys.filter((key) => response[key] !== undefined).map((key) => [key, response[key]])), http_status: response.status };
+  });
+  const primary = reads[0];
+  if (!primary?.sha256) throw new Error("来源结果缺少已读取响应的字节摘要");
+  const humanPage = output.human_page ?? (output.url && output.url !== primary.url && output.url !== primary.request_url ? output.url : null);
+  return { ...output, ...primary, human_page: humanPage, evidence_reads: reads };
+}
+
+function readResult(response, provider, fields) {
+  return attachReadEvidence(result(provider, fields), response);
 }
 
 function clean(value) {
@@ -350,7 +385,7 @@ export const PROVIDER_MATRIX = {
     baseUrl: "https://archive.org",
     entities: ["item metadata", "advancedsearch", "wayback"],
     rateLimit: "未公布；metadata 属高流量端点，保持串行",
-    note: "/metadata/<identifier> 对不存在条目返回 HTTP 200 且 body 为空对象 —— 必须按 metadata 是否为空判 not found，不能按 200 判存在。缩略图 /services/img/<identifier> 实测 200 image/jpeg。",
+    note: "/metadata/<identifier> 对不存在条目返回 HTTP 200 且 body 为空对象 —— 必须按 metadata 是否为空判 not found，不能按 200 判存在。缩略图 /services/img/<identifier> 实测 200 image/jpeg。**2026-10-11 本机复测：archive.org 整站不可达（http=000，连接超时约 21s），nslookup 把它解析到 2a03:2880:f134:83:face:b00c:0:25de —— 那是 Meta 的 face:b00c 虚荣段，说明解析异常，但仅凭这些观测无法确认具体原因**（同机 coverartarchive.org 与 musicbrainz.org 正常解析到 Hetzner 并 200）。因此本机 archive.item / archive.search / archive.wayback 与依赖它做兜底的 vgmdb.archive、以及 coverartarchive 取正文都会失败，且必须归为 network/unavailable，绝不能映射成 found:false。矩阵里 2026-10-03 的 access 快照是当时的观测，换机器或换网络后先复测再用。",
     verifiedAt: "2026-10-03",
   },
   tmdb: {
@@ -436,9 +471,54 @@ export const PROVIDER_MATRIX = {
     note: "Valve 官方商店接口，匿名可读、无需 key。2026-10-08 本机实测：GET /api/appdetails?appids=<id>&l=<lang>&cc=<cc> 返回 {\"<id>\":{success,data}}，AppID 不存在是 HTTP 200 + success:false（不是 404），appids=0 是 HTTP 400 且 body 为 null；不写 cc 时区域与币种按请求来源地解析（本机实测 JPY），可复现的定价必须显式 cc=；发行日期随 l= 本地化（\"2018 年 1 月 25 日\"/\"2018年1月25日\"/\"Jan 25, 2018\"）。GET /api/storesearch/?term=&l=&cc= 返回 {total,items}。steamdb.info 是第三方聚合站、对机读返回 HTTP 403 自有拦截页（无 Cloudflare 挑战特征），只作人工交叉核对，连接器不抓取它，只从它的 /app/<id>/ 链接取 AppID。商店页署名（developers/publishers）与价格由发行商与 Valve 提供，写入目录前仍按字段来源策略逐项核对。",
     verifiedAt: "2026-10-08",
   },
+  coverartarchive: {
+    label: "Cover Art Archive", access: "anonymous", authority: "official-community",
+    baseUrl: "https://coverartarchive.org",
+    entities: ["release 封面图组", "release-group 封面图组"],
+    rateLimit: "官方未公布固定额度；index.json 与图片正文由 archive.org 托管，批量取图按 archive.org 的礼仪限速，本模块同主机 ≥300ms 串行",
+    note: "MusicBrainz 官方封面图存档，按 MBID 取 index.json：GET /release/{mbid} 或 /release-group/{mbid}。2026-10-11 本机实测三条关键事实：① 没有封面时返回 HTTP 404 + HTML「No cover art found for release <mbid>」，这是提供方的明确答复（found:false），不是故障；② release-group 请求会 307 到「CAA 选定的那一个发行版」的 index，因此图属于 index 里 release 字段指向的那个 Release，不是整组通用——写封面必须按 release_of_record 归位，不得沿用上级；③ index.json 与图片正文都在 archive.org 上，而本机 archive.org 出现异常 DNS 解析（疑似 DNS 污染）（解析到 2a03:2880:f134:83:face:b00c:0:25de 这个 Meta 段地址，连接超时 http=000），而 coverartarchive.org 与 musicbrainz.org 正常解析到 Hetzner 并 200——所以本机取不到正文属网络可达性问题，不得据此判定 CAA 失效或该 MBID 无封面。图片由社区上传、逐张授权不同；选图判据是 types 与 front/back（Case Front 是正面再摄＝与 Front 重复，Back/Case Back 才是不同画面）。图片尺寸需自己打开确认，index.json 不提供像素。",
+    verifiedAt: "2026-10-11",
+  },
+  kitsu: {
+    label: "Kitsu", access: "anonymous", authority: "official-community",
+    baseUrl: "https://kitsu.io/api/edge",
+    entities: ["anime", "manga", "search"],
+    rateLimit: "JSON:API 公开端点，官方未公布固定额度；本模块同主机 ≥300ms 串行",
+    note: "JSON:API 形态（data/attributes/relationships/meta/links），匿名可读无需 key。GET /anime/{id}、/manga/{id}，检索 GET /anime?filter[text]=<词>&page[limit]=N；也可用 filter[slug]=<slug> 按 slug 取。2026-10-11 本机实测：不存在的 id 返回 HTTP 404 + {\"errors\":[{\"code\":\"404\",\"title\":\"Record not found\"}]}，可按 found:false 判读；titles 是任意语种键的映射（实测 en / en_jp / ja_jp / zh_cn / ko_kr / pt_br / th_th / it_it），其中 en_jp 是罗马音而不是语种，连接器按 BCP-47 归一并把 en_jp 单列 romaji；posterImage.meta.dimensions 直接给 tiny/small/medium/large 各档宽高（实测 large 550×780、small 284×402），据此判封面尺寸是否够门槛，不要只看 HTTP 200 就选图；coverImage 是宽幅横幅不是海报，不作封面候选。synopsis 末尾常带「(Source: Wikipedia)」「(Source: Crunchyroll)」这类出处标注，那是简介的来源证据：Kitsu 本身是社区聚合站，不能仅凭站点名当权威来源。relationships 默认只给链接，需要 cast/staff/genres 时用 include= 另取。",
+    verifiedAt: "2026-10-11",
+  },
+  vndb: {
+    label: "VNDB", access: "anonymous", authority: "official-community",
+    baseUrl: "https://api.vndb.org/kana",
+    entities: ["vn", "release", "character", "staff", "schema"],
+    rateLimit: "官方口径约每分钟 1 次突发、持续 10 秒内不超过 15 次；本模块同主机 ≥300ms 串行，批量时自行降频",
+    note: "API v2（Kana）：POST https://api.vndb.org/kana/<vn|release|character|staff|tag|trait|producer>，体为 {\"filters\":[...],\"results\":N,\"fields\":\"...\"}，返回 {more,results}。2026-10-11 本机实测的关键陷阱：① 路径不是 POST /kana（那样返回 HTTP 404 纯文本「Not found.」，容易误判成端点失效），真实端点是 /kana/<type>；② 分页参数是 results 不是 count（用 count 得 HTTP 400「Invalid 'count' member.」）；③ fields 严格校验，写错字段名或嵌套对象不给子字段都会 400 并明确指出是哪个字段（实测 vn 没有 original 字段——用 alttitle/titles；release 的 languages 与 media 必须写成 languages.lang,languages.title 与 media.medium,media.qty）；权威字段名可用 vndb.schema（GET /kana/schema 的 api_fields）查，不必试错。released 用 00 表示未知的月/日（\"2003-05-00\"＝2003 年 5 月、\"2003-00-00\"＝2003 年），连接器按此归一，不当成非法日期。description 是 BBCode（含 [url=...]Wikipedia[/url] 这类标注），既是转写义务也是出处线索。release 的 gtin/catalog/media/producers(developer|publisher)/minage 是社区转录的品番、条码、载体构成与权利方分工候选。image.sexual 与 image.violence 是社区投票数，不是分级结论。",
+    verifiedAt: "2026-10-11",
+  },
+  openbd: {
+    label: "OpenBD", access: "anonymous", authority: "official",
+    baseUrl: "https://api.openbd.jp/v1",
+    entities: ["按 ISBN 取书目记录"],
+    rateLimit: "公开 API，官方未公布固定额度；本模块同主机 ≥300ms 串行",
+    note: "日本出版物书目 API：GET /v1/get?isbn=<ISBN13>（是查询参数，不是 /get/{isbn}，后者一律 Not Found）。2026-10-11 本机实测：响应顶层是数组，命中为 [{onix,hanmoto,summary}]（注意是 hanmoto 不是 hamoto），查无为 [null] 且 HTTP 200——[null] 只说明 OpenBD 没收录。OpenBD 只收日本出版物，台版/引进版返回 [null] 是收录范围问题，不是站点故障，不得据此判定该书不存在或该站不可用。summary 给 isbn/title/volume/series/publisher/pubdate/cover/author 的规整值，onix 给完整 ONIX 原文（题名在 DescriptiveDetail.TitleDetail.TitleElement.TitleText.content，丛书在 Collection.TitleDetail.TitleElement[].TitleText.content，出版方在 PublishingDetail.Imprint.ImprintName，刊行年月在 PublishingDetail.PublishingDate[].Date，价格在 ProductSupply.SupplyDetail.Price[]）；PublishingDateRole 是 ONIX 代码，连接器不猜其含义、原样给出。summary.title 可能缺副题或标点（实测電撃文庫某卷少一个「.」），题名以版元商品页 h1 为准，OpenBD 只用来复核巻号·丛书·刊行年月。author 是 ONIX 倒装形（实测「師走,トオル」＝姓,名）。summary.cover 常为空串；cover.openbd.jp/<isbn>.jpg 在无封面时返回 404。**两个必须避开的坑**：① 同域名的 /v1/coverage 端点会**忽略 isbn 参数**、直接返回全量收录清单（2026-10-11 实测响应 59MB），任何情况下都不要调它，连接器也不调；② www.openbd.jp（人类页面）本机实测 http=000 连不上，而 api.openbd.jp 正常 200，所以证据 URL 用实际读到的 API 地址，别拼一个打不开的\"书目页\"当来源。",
+    verifiedAt: "2026-10-11",
+  },
+  gutenberg: {
+    label: "Project Gutenberg", access: "anonymous", authority: "official",
+    baseUrl: "https://www.gutenberg.org",
+    entities: ["ebook（RDF 书目记录）", "search"],
+    rateLimit: "官方要求低频访问；本模块同主机 ≥300ms 串行",
+    note: "取 /cache/epub/{id}/pg{id}.rdf 这份 RDF 而不是页面 HTML：2026-10-11 实测 ebook 1513 的 HTML 里 RDFa content 属性是交叉错位的——property=\"dcterms:issued\" content=\"2025-09-18\"（其实是最后更新日）而 property=\"dcterms:modified\" content=\"1998-11-01\"（其实是发行日），只有可见文本 itemprop=\"datePublished\" 的「Nov 1, 1998」是对的；同一份 RDF 文件里 dcterms:issued 正确给出 1998-11-01。所以日期一律走 RDF。RDF 给 dcterms:title / issued / rights / language(RFC4646) / subject(LCSH) / hasFormat(各格式文件与 extent) 与 pgterms:agent（name 是倒装形「Shakespeare, William」，另有 birthdate/deathdate/alias/webpage）。检索 GET /ebooks/search/?query=<词> 返回 HTML，其中 class=\"link\" href=\"/ebooks/<id>\" 与紧随的 span.subtitle（作者）成对；结果里混着同名异书与不同译本，必须逐个开 RDF 核对署名后再用。dcterms:rights 实测为「Public domain in the USA.」——只覆盖美国，不能据此断言全球公版。gutendex.com 是第三方镜像（实测 301），连接器不用它。",
+    verifiedAt: "2026-10-11",
+  },
 };
 
-for (const entry of Object.values(PROVIDER_MATRIX)) {
+for (const [provider, entry] of Object.entries(PROVIDER_MATRIX)) {
+  entry.source_qualification = sourceQualification(provider);
+  if (["openlibrary", "myanimelist"].includes(provider)) entry.authority = "community";
+  if (provider === "internetarchive") entry.authority = "archive-platform";
+  if (provider === "openbd") entry.authority = "bibliographic-aggregator";
+  if (provider === "gutenberg") entry.authority = "own-digital-edition-publisher";
   entry.accessObservation = {
     status: entry.access,
     observedAt: entry.verifiedAt,
@@ -539,19 +619,19 @@ export async function fetchDiscogsRelease(idOrUrl, opts) {
   const id = normalizeDiscogsId(idOrUrl, "release");
   const url = "https://api.discogs.com/releases/" + id;
   const res = await jsonRequest(url, Object.assign({ provider: "discogs" }, opts));
-  if (res.notFound) return result("discogs", { found: false, id: id, url: url, raw: res.raw, notes: "Discogs 返回 404（该 release 不存在或已删除）" });
-  return mapDiscogsRelease(res.json, "release");
+  if (res.notFound) return readResult(res, "discogs", { found: false, id: id, url: url, raw: res.raw, notes: "Discogs 返回 404（该 release 不存在或已删除）" });
+  return attachReadEvidence(mapDiscogsRelease(res.json, "release"), res);
 }
 
 export async function fetchDiscogsMaster(idOrUrl, opts) {
   const id = normalizeDiscogsId(idOrUrl, "master");
   const url = "https://api.discogs.com/masters/" + id;
   const res = await jsonRequest(url, Object.assign({ provider: "discogs" }, opts));
-  if (res.notFound) return result("discogs", { found: false, id: id, url: url, raw: res.raw, notes: "Discogs master 404" });
+  if (res.notFound) return readResult(res, "discogs", { found: false, id: id, url: url, raw: res.raw, notes: "Discogs master 404" });
   const mapped = mapDiscogsRelease(res.json, "master");
   mapped.external_ids = Object.assign({}, mapped.external_ids, { master: id });
   mapped.notes = "master 记录（版本列表在 " + ((res.json && res.json.versions_url) ? res.json.versions_url : "缺") + "）；" + (mapped.notes || "");
-  return mapped;
+  return attachReadEvidence(mapped, res);
 }
 
 /** 社区库检索：只返回候选，身份判定留给调用方（同名不同物在 Discogs 极常见）。 */
@@ -585,7 +665,7 @@ export async function searchDiscogs(query, opts) {
     image_url: r.cover_image || r.thumb || null,
     url: r.uri || r.resource_url || null,
   }));
-  return result("discogs", {
+  return readResult(res, "discogs", {
     found: hits.length > 0,
     id: hits[0] ? hits[0].id : null,
     title: hits[0] ? hits[0].title : null,
@@ -669,19 +749,19 @@ export async function lookupOpenLibraryEdition(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "book");
   const url = "https://openlibrary.org/books/" + olid + ".json";
   const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
-  if (res.notFound) return result("openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary edition 404" });
-  return mapOpenLibraryBook(res.json, "edition");
+  if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary edition 404" });
+  return attachReadEvidence(mapOpenLibraryBook(res.json, "edition"), res);
 }
 
 export async function lookupOpenLibraryWork(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "work");
   const url = "https://openlibrary.org/works/" + olid + ".json";
   const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
-  if (res.notFound) return result("openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary work 404" });
+  if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary work 404" });
   const data = requireObject(res.json, "openlibrary", "work");
   if (!clean(data.key) || !clean(data.title)) throw new ProviderError("parse", "openlibrary", "work 响应缺少 key 或 title", { retryable: false });
   const cover = Array.isArray(data.covers) ? data.covers.find((c) => Number(c) > 0) : null;
-  return result("openlibrary", {
+  return readResult(res, "openlibrary", {
     id: olid,
     title: clean(data.title),
     titles: { title: clean(data.title), subtitle: clean(data.subtitle) },
@@ -699,13 +779,13 @@ export async function lookupOpenLibraryAuthor(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "author");
   const url = "https://openlibrary.org/authors/" + olid + ".json";
   const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
-  if (res.notFound) return result("openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary author 404" });
+  if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary author 404" });
   const data = requireObject(res.json, "openlibrary", "author");
   if (!clean(data.key) || !(clean(data.name) || clean(data.personal_name))) {
     throw new ProviderError("parse", "openlibrary", "author 响应缺少 key 或 name", { retryable: false });
   }
   const remote = data.remote_ids || {};
-  return result("openlibrary", {
+  return readResult(res, "openlibrary", {
     id: olid,
     title: clean(data.name) || clean(data.personal_name),
     titles: { name: clean(data.name), personal_name: clean(data.personal_name), alternate_names: data.alternate_names || null },
@@ -735,7 +815,7 @@ export async function listOpenLibraryEditions(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "work");
   const url = "https://openlibrary.org/works/" + olid + "/editions.json?limit=" + String(Math.min(100, Math.max(1, o.limit || 20)));
   const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, o));
-  if (res.notFound) return result("openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary work 不存在（editions 404）" });
+  if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary work 不存在（editions 404）" });
   const rawEntries = requireArrayField(res.json, "entries", "openlibrary", "work editions");
   const entries = rawEntries.map((e) => requireSearchItem(e, "openlibrary", "work editions", ["key"], ["title"])).map((e) => ({
     id: olKeyToId(e.key),
@@ -750,7 +830,7 @@ export async function listOpenLibraryEditions(olidOrUrl, opts) {
     isbn_10: Array.isArray(e.isbn_10) ? e.isbn_10.map(clean).filter(Boolean) : null,
     physical_pages: e.number_of_pages != null ? String(e.number_of_pages) : null,
   }));
-  return result("openlibrary", {
+  return readResult(res, "openlibrary", {
     found: entries.length > 0,
     id: olid,
     title: entries.length ? entries[0].title : null,
@@ -790,7 +870,7 @@ export async function searchOpenLibrary(query, opts) {
     isbn: Array.isArray(d.isbn) ? d.isbn.slice(0, 4) : null,
     languages: Array.isArray(d.language) ? d.language : null,
   }));
-  return result("openlibrary", {
+  return readResult(res, "openlibrary", {
     found: docs.length > 0,
     id: docs[0] ? docs[0].id : null,
     title: docs[0] ? docs[0].title : null,
@@ -817,10 +897,10 @@ export async function lookupOpenLibraryByIsbn(isbn, opts) {
     throw new ProviderError("parse", "openlibrary", "ISBN search 响应缺少有效 numFound", { retryable: false });
   }
   if (!docs.length) {
-    return result("openlibrary", { found: false, id: null, url: "https://openlibrary.org/isbn/" + cleanIsbn, raw: res.json, notes: "OpenLibrary 无该 ISBN 记录（isbn=" + cleanIsbn + "）" });
+    return readResult(res, "openlibrary", { found: false, id: null, url: "https://openlibrary.org/isbn/" + cleanIsbn, raw: res.json, notes: "OpenLibrary 无该 ISBN 记录（isbn=" + cleanIsbn + "）" });
   }
   const hit = requireSearchItem(docs[0], "openlibrary", "ISBN search", ["key"], ["title"]);
-  return result("openlibrary", {
+  return readResult(res, "openlibrary", {
     id: olKeyToId(hit.key),
     title: clean(hit.title),
     image_url: hit.cover_i != null ? openLibraryCoverUrl(hit.cover_i, "L") : null,
@@ -913,8 +993,8 @@ export async function fetchArchiveItem(identifier, opts) {
   const id = normalizeArchiveIdentifier(identifier);
   const url = "https://archive.org/metadata/" + encodeURIComponent(id);
   const res = await jsonRequest(url, Object.assign({ provider: "internetarchive" }, opts));
-  if (res.notFound) return result("internetarchive", { found: false, id: id, url: url, raw: res.raw, notes: "archive.org /metadata 返回 404" });
-  return mapArchiveMetadata(res.json, id);
+  if (res.notFound) return readResult(res, "internetarchive", { found: false, id: id, url: url, raw: res.raw, notes: "archive.org /metadata 返回 404" });
+  return attachReadEvidence(mapArchiveMetadata(res.json, id), res);
 }
 
 /** advancedsearch：只用于发现候选，不代替逐字核对。 */
@@ -951,7 +1031,7 @@ export async function searchArchive(query, opts) {
     url: "https://archive.org/details/" + d.identifier,
     };
   });
-  return result("internetarchive", {
+  return readResult(res, "internetarchive", {
     found: docs.length > 0,
     id: docs[0] ? docs[0].identifier : null,
     title: docs[0] ? docs[0].title : null,
@@ -978,11 +1058,12 @@ export async function waybackSnapshot(archivedUrl, opts) {
     throw new ProviderError("parse", "internetarchive", "Wayback closest snapshot 缺少 available/status/url", { retryable: false });
   }
   const usable = Boolean(snap && snap.available && String(snap.status) === "200");
-  return result("internetarchive", {
+  return readResult(res, "internetarchive", {
     found: usable,
     id: null,
     title: null,
     url: usable ? snap.url : null,
+    snapshot_url: usable ? snap.url : null,
     dates: snap && snap.timestamp ? { snapshot: clean(snap.timestamp) } : null,
     notes: usable ? "最近存档 " + snap.timestamp + "（status=" + snap.status + "）" : "该 URL 没有 status=200 的可用存档",
     raw: res.json,
@@ -1087,9 +1168,9 @@ export async function fetchTmdbMedia(id, opts) {
   const url = "https://api.themoviedb.org/3/" + type + "/" + normId + "?" + cfg.params.toString();
   const res = await jsonRequest(url, Object.assign({ provider: "tmdb", headers: cfg.headers, credentialHint: "在环境变量 TMDB_API_KEY（v3）或 TMDB_ACCESS_TOKEN（v4）里配置" }, o));
   if (res.notFound) {
-    return result("tmdb", { found: false, id: normId, url: "https://www.themoviedb.org/" + type + "/" + normId, raw: res.raw, notes: "TMDB " + type + " " + normId + " 不存在（404）" });
+    return readResult(res, "tmdb", { found: false, id: normId, url: "https://www.themoviedb.org/" + type + "/" + normId, raw: res.raw, notes: "TMDB " + type + " " + normId + " 不存在（404）" });
   }
-  return mapTmdbMedia(res.json, type);
+  return attachReadEvidence(mapTmdbMedia(res.json, type), res);
 }
 
 export async function searchTmdb(query, opts) {
@@ -1119,7 +1200,7 @@ export async function searchTmdb(query, opts) {
     dates: { release: isoDate(r.release_date || r.first_air_date) },
     url: "https://www.themoviedb.org/" + (r.media_type || type) + "/" + r.id,
   }));
-  return result("tmdb", {
+  return readResult(res, "tmdb", {
     found: hits.length > 0,
     id: hits[0] ? hits[0].id : null,
     title: hits[0] ? hits[0].title : null,
@@ -1222,7 +1303,7 @@ export async function fetchAniListMedia(idOrUrl, opts) {
   const res = await anilistGql(ANILIST_MEDIA_QUERY, { id: parsed.id, type: type }, o);
   const pageUrl = "https://anilist.co/" + type.toLowerCase() + "/" + parsed.id;
   if (res.notFound) {
-    return result("anilist", { found: false, id: String(parsed.id), url: pageUrl, raw: res.raw, notes: "AniList " + type + " " + parsed.id + " 不存在（404 Not Found）" });
+    return readResult(res, "anilist", { found: false, id: String(parsed.id), url: pageUrl, raw: res.raw, notes: "AniList " + type + " " + parsed.id + " 不存在（404 Not Found）" });
   }
   anilistGuard(res, "（id=" + parsed.id + "）");
   const root = requireObject(res.json, "anilist", "GraphQL");
@@ -1232,10 +1313,10 @@ export async function fetchAniListMedia(idOrUrl, opts) {
   }
   const media = data.Media;
   if (!media) {
-    return result("anilist", { found: false, id: String(parsed.id), url: pageUrl, raw: res.json, notes: "AniList 返回 data.Media=null（该 id 在 type=" + type + " 下无条目；先换 type 复查，再判无此线索）" });
+    return readResult(res, "anilist", { found: false, id: String(parsed.id), url: pageUrl, raw: res.json, notes: "AniList 返回 data.Media=null（该 id 在 type=" + type + " 下无条目；先换 type 复查，再判无此线索）" });
   }
   requireObject(media, "anilist", "GraphQL data.Media");
-  return mapAniListMedia(media);
+  return attachReadEvidence(mapAniListMedia(media), res);
 }
 
 export async function searchAniList(query, opts) {
@@ -1263,7 +1344,7 @@ export async function searchAniList(query, opts) {
     dates: { start: formatDatePart(m.startDate), season: clean(m.season) },
     format: clean(m.format), status: clean(m.status), url: m.siteUrl || null,
   }));
-  return result("anilist", {
+  return readResult(res, "anilist", {
     found: hits.length > 0,
     id: hits[0] ? hits[0].id : null,
     title: hits[0] ? hits[0].title : null,
@@ -1332,9 +1413,9 @@ export async function fetchMyAnimeList(idOrUrl, opts) {
   const url = "https://api.myanimelist.net/v2/" + parsed.type + "/" + parsed.id + "?fields=" + (o.fields || MAL_FIELDS);
   const res = await jsonRequest(url, Object.assign({ provider: "myanimelist", headers: { "X-MAL-CLIENT-ID": clientId } }, o));
   if (res.notFound) {
-    return result("myanimelist", { found: false, id: parsed.id, url: "https://myanimelist.net/" + parsed.type + "/" + parsed.id, raw: res.raw, notes: "MyAnimeList " + parsed.type + " " + parsed.id + " 不存在（404）" });
+    return readResult(res, "myanimelist", { found: false, id: parsed.id, url: "https://myanimelist.net/" + parsed.type + "/" + parsed.id, raw: res.raw, notes: "MyAnimeList " + parsed.type + " " + parsed.id + " 不存在（404）" });
   }
-  return mapMalAnime(res.json);
+  return attachReadEvidence(mapMalAnime(res.json), res);
 }
 
 export async function searchMyAnimeList(query, opts) {
@@ -1363,7 +1444,7 @@ export async function searchMyAnimeList(query, opts) {
     url: "https://myanimelist.net/" + type + "/" + node.id,
     };
   });
-  return result("myanimelist", {
+  return readResult(res, "myanimelist", {
     found: hits.length > 0,
     id: hits[0] ? hits[0].id : null,
     title: hits[0] ? hits[0].title : null,
@@ -1432,7 +1513,7 @@ export async function fetchIsniRecord(isni, opts) {
       archiveHint: "isni.org 被反爬拦：ISNI / VIAF 改从 Wikidata P213 / P214 取（mf-fetch-authoritative 的 fetchWikidataEntity），或用 isniFromWikidataClaims 抽取；OpenLibrary author.remote_ids 只作线索",
     }, opts));
   if (res.notFound) {
-    return result("isni", { found: false, id: value, url: url, raw: res.text.slice(0, 4000), notes: "ISNI 登记机构明确返回 HTTP " + res.status });
+    return readResult(res, "isni", { found: false, id: value, url: url, raw: res.text.slice(0, 4000), notes: "ISNI 登记机构明确返回 HTTP " + res.status });
   }
   if (looksLikeBotChallenge(res.text)) {
     throw new ProviderError("blocked", "isni", "HTTP " + res.status + " 返回反爬挑战页，不是 ISNI 记录", {
@@ -1468,7 +1549,7 @@ export async function fetchIsniRecord(isni, opts) {
   if (!label) {
     throw new ProviderError("parse", "isni", "记录缺少有效 label", { status: res.status, url: url, retryable: false });
   }
-  return result("isni", {
+  return readResult(res, "isni", {
     id: value,
     title: label,
     external_ids: { isni: value },
@@ -1495,7 +1576,7 @@ export async function fetchViafRecord(viafId, opts) {
     throw err;
   }
   if (res.notFound) {
-    return result("viaf", { found: false, id: id, url: url, raw: res.raw, notes: "VIAF 明确返回 HTTP " + res.status });
+    return readResult(res, "viaf", { found: false, id: id, url: url, raw: res.raw, notes: "VIAF 明确返回 HTTP " + res.status });
   }
   const record = requireObject(res.json, "viaf", "record");
   if (String(record.viafID == null ? "" : record.viafID) !== id || !record.mainHeadings || !Array.isArray(record.mainHeadings.data)) {
@@ -1509,7 +1590,7 @@ export async function fetchViafRecord(viafId, opts) {
   if (!heading) {
     throw new ProviderError("parse", "viaf", "VIAF record 缺少有效 main heading", { status: res.status, url: url, retryable: false });
   }
-  return result("viaf", {
+  return readResult(res, "viaf", {
     id: id,
     title: heading,
     external_ids: { viaf: id },
@@ -1623,9 +1704,9 @@ export async function fetchNdlAuthority(idOrUrl, opts) {
   const url = "https://id.ndl.go.jp/auth/ndlna/" + id + ".json";
   const res = await jsonRequest(url, Object.assign({ provider: "ndl" }, opts));
   if (res.notFound) {
-    return result("ndl", { found: false, id: id, url: url, raw: res.raw, notes: "NDL 权威记录 " + id + " 不存在（404；书志 LD / ndlsht / ncl 当前也可能 404，见矩阵）" });
+    return readResult(res, "ndl", { found: false, id: id, url: url, raw: res.raw, notes: "NDL 权威记录 " + id + " 不存在（404；书志 LD / ndlsht / ncl 当前也可能 404，见矩阵）" });
   }
-  return mapNdlAuthority(res.json, id);
+  return attachReadEvidence(mapNdlAuthority(res.json, id), res);
 }
 
 // ───────────────────────── 9. VGMdb（无 API：HTML 解析 + 存档读取） ─────────────────────────
@@ -1759,7 +1840,7 @@ export async function fetchVgmdbAlbum(idOrUrl, opts) {
       provider: "vgmdb", accept: "text/html",
       archiveHint: "直连被反爬拦：改用 fetchVgmdbAlbumViaArchive 走 Internet Archive id_ 存档读取",
     }, opts));
-  return parseVgmdbAlbumHtml(res.text, { albumId: id, sourceUrl: url });
+  return attachReadEvidence(parseVgmdbAlbumHtml(res.text, { albumId: id, sourceUrl: url }), res);
 }
 
 /** 经 Internet Archive 存档读取原样正文（id_ 修饰符），并保留「经存档」标注。 */
@@ -1772,11 +1853,11 @@ export async function fetchVgmdbAlbumViaArchive(idOrUrl, opts) {
     throw new ProviderError("unavailable", "vgmdb", "没有可用的 Internet Archive 存档：" + originalUrl,
       { retryable: false, hint: availability.notes || "wayback available 未返回 status=200 的快照" });
   }
-  let snapshotUrl = String(availability.url).replace(/^http:/i, "https:");
+  let snapshotUrl = String(availability.snapshot_url).replace(/^http:/i, "https:");
   if (!/\/web\/\d{8,14}id_\//i.test(snapshotUrl)) {
     snapshotUrl = snapshotUrl.replace(/(\/web\/\d{8,14})\/(https?:\/\/.*)$/i, "$1id_/$2");
   }
-  if (snapshotUrl === String(availability.url).replace(/^http:/i, "https:") && !/id_\//.test(snapshotUrl)) {
+  if (snapshotUrl === String(availability.snapshot_url).replace(/^http:/i, "https:") && !/id_\//.test(snapshotUrl)) {
     throw new ProviderError("parse", "internetarchive", "无法从快照 URL 拼出 id_ 原样正文：" + snapshotUrl, { retryable: false });
   }
   const res = await httpRequest(snapshotUrl, Object.assign({
@@ -1784,12 +1865,12 @@ export async function fetchVgmdbAlbumViaArchive(idOrUrl, opts) {
   }, o));
   const parsed = parseVgmdbAlbumHtml(res.text, { albumId: id, sourceUrl: originalUrl });
   parsed.notes = (parsed.notes ? parsed.notes + "；" : "")
-    + "经 Internet Archive 存档读取（快照 " + (availability.dates && availability.dates.snapshot ? availability.dates.snapshot : "?") + "）；写入时 pictures[].source.url 用 "
-    + originalUrl + " 并在 citation 注明经存档";
+    + "经 Internet Archive 存档读取（快照 " + (availability.dates && availability.dates.snapshot ? availability.dates.snapshot : "?") + "）；证据 URL 用本次读取的存档地址 "
+    + res.url + "，原始页面只在 human_page 与 citation 记录；图片仍逐张读取和核对归属";
   parsed.raw = Object.assign({}, parsed.raw, {
     snapshot_url: res.url, snapshot_timestamp: availability.dates ? availability.dates.snapshot : null, original_url: originalUrl,
   });
-  return parsed;
+  return attachReadEvidence(parsed, res);
 }
 
 // ───────────────────────── 12. iTunes Store ─────────────────────────
@@ -1987,7 +2068,7 @@ export async function searchItunes(query, opts) {
   const hits = rawResults
     .map((r) => requireSearchItem(r, "itunes", "search", ["collectionId"], ["collectionName"]))
     .map((r) => mapItunesSearchHit(r, storefront));
-  return result("itunes", {
+  return readResult(res, "itunes", {
     found: hits.length > 0,
     id: hits[0] ? hits[0].id : null,
     title: hits[0] ? hits[0].title : null,
@@ -2019,7 +2100,7 @@ export async function lookupItunesAlbum(idOrUrl, opts) {
   }
   const collection = rawResults.find((r) => r && r.wrapperType === "collection");
   if (!collection) {
-    return result("itunes", {
+    return readResult(res, "itunes", {
       found: false,
       id: id,
       url: url,
@@ -2050,7 +2131,7 @@ export async function lookupItunesAlbum(idOrUrl, opts) {
   const genre = clean(collection.primaryGenreName);
   const copyright = clean(collection.copyright);
   const artwork = itunesArtworkBlock(collection.artworkUrl100);
-  return result("itunes", {
+  return readResult(res, "itunes", {
     id: String(collection.collectionId),
     title: clean(collection.collectionName),
     titles: {
@@ -2252,6 +2333,7 @@ export async function fetchSteamApp(idOrUrl, opts) {
   const langs = steamLangs(parsed, o);
   const cc = steamCc(parsed, o);
 
+  const reads = [];
   const locales = {};
   const success = {};
   const withoutData = [];
@@ -2259,6 +2341,7 @@ export async function fetchSteamApp(idOrUrl, opts) {
     const params = new URLSearchParams({ appids: id, l: lang, cc: cc });
     const url = STEAM_STORE + "/api/appdetails?" + params.toString();
     const res = await jsonRequest(url, Object.assign({ provider: "steam" }, o));
+    reads.push({ ...res, language: lang });
     if (res.notFound) {
       success[lang] = null;
       withoutData.push(lang);
@@ -2281,8 +2364,9 @@ export async function fetchSteamApp(idOrUrl, opts) {
   }
 
   const okLangs = langs.filter((lang) => locales[lang]);
+  reads.sort((a, b) => Number(Boolean(locales[b.language])) - Number(Boolean(locales[a.language])));
   if (!okLangs.length) {
-    return result("steam", {
+    return readResult(reads, "steam", {
       found: false,
       id: id,
       url: steamStoreUrl(id),
@@ -2332,7 +2416,7 @@ export async function fetchSteamApp(idOrUrl, opts) {
     "titles 是各语种的商店题名（译文可能非官方正式题名），写入 translations 前按命名与来源策略核对",
   ].filter(Boolean).join("；");
 
-  return result("steam", {
+  return readResult(reads, "steam", {
     id: id,
     title: clean(primary.name),
     titles: Object.keys(titles).length ? titles : null,
@@ -2379,7 +2463,7 @@ export async function searchSteam(query, opts) {
   const url = STEAM_STORE + "/api/storesearch/?" + params.toString();
   const res = await jsonRequest(url, Object.assign({ provider: "steam" }, o));
   if (res.notFound) {
-    return result("steam", {
+    return readResult(res, "steam", {
       found: false,
       url: url,
       notes: "Steam storesearch 返回 404/410：该读取路径当前没有答案，不等于没有匹配作品",
@@ -2411,7 +2495,7 @@ export async function searchSteam(query, opts) {
       raw: item,
     };
   });
-  return result("steam", {
+  return readResult(res, "steam", {
     found: hits.length > 0,
     id: hits[0] ? hits[0].id : null,
     title: hits[0] ? hits[0].name : null,
@@ -2421,6 +2505,1321 @@ export async function searchSteam(query, opts) {
       ? "候选 " + hits.length + " 条（total=" + (total == null ? "?" : total) + "，lang=" + lang + "，cc=" + cc + "）；检索结果是候选，写入前核对 AppID、类型（app / 原声 / DLC）与题名"
       : "Steam storesearch 无命中（total=" + (total == null ? "?" : total) + "，lang=" + lang + "，cc=" + cc + "）：该地区与语种下没有匹配候选；换 lang=schinese / japanese 或换检索词再试",
     raw: { total: total, cc: cc, lang: lang, hits: hits },
+  });
+}
+
+// ───────────────────────── ISBN（OpenBD 等书目源共用） ─────────────────────────
+
+const ISBN_10_SHAPE = /^\d{9}[\dX]$/;
+const ISBN_13_SHAPE = /^(?:978|979)\d{10}$/;
+// 前后都要非字母数字边界：否则 13 位非 978/979 开头的数字串会被 \d{9}[\dX] 截前 10 位当成 ISBN-10。
+const ISBN_TOKEN = /(?:^|[^0-9A-Z])((?:978|979)\d{10}|\d{9}[\dX])(?![0-9A-Z])/;
+
+/**
+ * 规整 ISBN：去空格与连字符、末位 x 大写；也接受把 ISBN 包在链接或「ISBN:」前缀里的写法。
+ * 只校验**形状**，不拿校验位当拒绝理由——站内确实存在校验位写错的 ISBN（那是待整改的数据问题），
+ * 拒绝会让这类记录连「取回来源核对」都做不到。校验位结论由 isbnCheckDigit 单独作为提示给出。
+ */
+export function normalizeIsbn(input, provider) {
+  const p = provider || "openbd";
+  const raw = String(input == null ? "" : input).trim();
+  if (!raw) throw new ProviderError("bad_input", p, "ISBN 不能为空");
+  const compact = raw.replace(/[\s-]/g, "").toUpperCase();
+  let value = null;
+  if (ISBN_13_SHAPE.test(compact) || ISBN_10_SHAPE.test(compact)) value = compact;
+  else {
+    const m = compact.match(ISBN_TOKEN);
+    if (m) value = m[1];
+  }
+  if (!value) {
+    throw new ProviderError("bad_input", p,
+      "无法解析 ISBN：" + raw.slice(0, 60)
+      + "（需要 ISBN-13：978/979 开头共 13 位；或 ISBN-10：9 位数字 + 校验位，末位可为 X）");
+  }
+  return value;
+}
+
+/**
+ * ISBN 校验位：ISBN-13 与 EAN-13 同算法（复用 gtinCheckDigitValid，不另写第二份），
+ * ISBN-10 是 mod-11 加权和、末位可为 X（=10）。形状不合返回 valid:null，不猜。
+ */
+export function isbnCheckDigit(input) {
+  const digits = String(input == null ? "" : input).trim().toUpperCase().replace(/[\s-]/g, "");
+  if (ISBN_13_SHAPE.test(digits)) return { scheme: "isbn-13", valid: gtinCheckDigitValid(digits) };
+  if (ISBN_10_SHAPE.test(digits)) {
+    let sum = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const c = digits[i];
+      sum += (c === "X" ? 10 : Number(c)) * (10 - i);
+    }
+    return { scheme: "isbn-10", valid: sum % 11 === 0 };
+  }
+  return { scheme: null, valid: null };
+}
+
+// ───────────────────────── Cover Art Archive ─────────────────────────
+
+const CAA_BASE = "https://coverartarchive.org";
+const MBID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CAA_KINDS = ["release", "release-group"];
+
+/**
+ * 解析 MBID 与层级。层级必须明确：release 与 release-group 的 MBID 不可互换，
+ * 而站内 musicbrainz 码的 url_pattern 是 release-group 形态，混层会生成错链接。
+ * 链接里的层级与请求的操作冲突时抛 bad_input，不猜。
+ */
+export function normalizeCoverArtRef(input, requestedKind) {
+  const raw = String(input == null ? "" : input).trim();
+  if (!raw) throw new ProviderError("bad_input", "coverartarchive", "缺少 MBID 或 Cover Art Archive / MusicBrainz 链接");
+  const fromUrl = raw.match(/(?:coverartarchive\.org|musicbrainz\.org)\/(release-group|release)\/([0-9A-Fa-f-]{36})/i);
+  const urlKind = fromUrl ? fromUrl[1].toLowerCase() : null;
+  const wanted = CAA_KINDS.includes(requestedKind) ? requestedKind : null;
+  const id = String(fromUrl ? fromUrl[2] : raw).trim().toLowerCase();
+  if (!MBID_SHAPE.test(id)) {
+    throw new ProviderError("bad_input", "coverartarchive",
+      "MBID 需要标准 36 位 UUID 形态，实际：" + raw.slice(0, 60));
+  }
+  if (urlKind && wanted && urlKind !== wanted) {
+    throw new ProviderError("bad_input", "coverartarchive",
+      "链接里的层级是 " + urlKind + "，但请求的操作是 caa." + wanted + "；两者不一致，请核对这个 MBID 属于哪一层");
+  }
+  const kind = urlKind || wanted;
+  if (!kind) {
+    throw new ProviderError("bad_input", "coverartarchive",
+      "必须指明层级：用 caa.release 或 caa.release-group，或给一条含 /release/ 或 /release-group/ 的链接");
+  }
+  return { kind: kind, id: id };
+}
+
+export function coverArtPageUrl(kind, id) {
+  return CAA_BASE + "/" + kind + "/" + String(id).toLowerCase();
+}
+
+/** index.json 的 release 字段：release-group 请求时它指向 CAA 选定的那一个发行版。 */
+function caaReleaseOfRecord(data) {
+  const rel = data && typeof data.release === "string" ? data.release.trim() : null;
+  if (!rel) return null;
+  const m = rel.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  return { url: rel, mbid: m ? m[1].toLowerCase() : null };
+}
+
+function caaImageBlock(entry) {
+  const item = requireObject(entry, "coverartarchive", "CAA images 项");
+  const thumbs = item.thumbnails && typeof item.thumbnails === "object" ? item.thumbnails : {};
+  return {
+    id: item.id == null ? null : String(item.id),
+    types: Array.isArray(item.types) ? item.types.map(clean).filter(Boolean) : [],
+    front: item.front === true,
+    back: item.back === true,
+    approved: item.approved === true,
+    edit: Number.isFinite(Number(item.edit)) && item.edit != null ? Number(item.edit) : null,
+    comment: clean(item.comment),
+    image_url: clean(item.image),
+    thumbnails: {
+      small: clean(thumbs.small), 250: clean(thumbs["250"]),
+      500: clean(thumbs["500"]), 1200: clean(thumbs["1200"]), large: clean(thumbs.large),
+    },
+  };
+}
+
+/**
+ * 按 MBID 取封面图组。CAA 的 404 是「这一层没有封面图」的明确答复（body 是 HTML
+ * 「No cover art found for ...」），按 found:false 判读；index.json 与图片正文都在
+ * archive.org 上，取不到属网络问题，由 httpRequest 归为 network/unavailable，不映射成 found:false。
+ */
+export async function fetchCoverArtArchive(idOrUrl, opts) {
+  const o = opts || {};
+  const ref = normalizeCoverArtRef(idOrUrl, o.kind);
+  const url = coverArtPageUrl(ref.kind, ref.id);
+  const res = await httpRequest(url, Object.assign({ provider: "coverartarchive", accept: "application/json" }, o));
+
+  if (res.notFound) {
+    const body = String(res.text || "").replace(/\s+/g, " ").trim();
+    const explicit = /No cover art found/i.test(body);
+    if (!explicit) {
+      throw new ProviderError("unavailable", "coverartarchive",
+        "HTTP " + res.status + " 但响应不是 CAA 的「无封面」答复：" + body.slice(0, 160),
+        { status: res.status, url: url, retryable: true, hint: "404 只有在 body 明写 No cover art found 时才是提供方的答复" });
+    }
+    return readResult(res, "coverartarchive", {
+      found: false,
+      id: ref.id,
+      url: url,
+      notes: "Cover Art Archive 明确答复：" + ref.kind + " " + ref.id + " 没有封面图（HTTP " + res.status + "）。"
+        + "这只说明 CAA 没收录，不代表该发行版没有封面——厂牌官方商品页、商店页与 MusicBrainz 之外的渠道仍可能有图。",
+      raw: { kind: ref.kind, mbid: ref.id, status: res.status, body: body.slice(0, 300) },
+    });
+  }
+
+  let data;
+  try {
+    data = JSON.parse(res.text);
+  } catch (err) {
+    throw new ProviderError("parse", "coverartarchive",
+      "index.json 不是合法 JSON（content-type=" + (res.contentType || "?") + "）：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
+      { status: res.status, url: url, cause: err });
+  }
+  const images = requireArrayField(data, "images", "coverartarchive", "CAA index");
+  const mapped = images.map(caaImageBlock);
+  const record = caaReleaseOfRecord(data);
+  const fronts = mapped.filter((i) => i.front);
+  const backs = mapped.filter((i) => i.back);
+
+  const notes = [
+    "层级=" + ref.kind + "，共 " + mapped.length + " 张（front " + fronts.length + " / back " + backs.length + "）",
+    ref.kind === "release-group" && record
+      ? "这是 release-group 请求，CAA 307 到了它选定的发行版：" + (record.mbid || record.url)
+        + "。图属于**那个 Release**，不是整组通用；写 Release 封面按 release_of_record 归位，不得沿用上级实体"
+      : null,
+    record && record.mbid && record.mbid !== ref.id
+      ? "index 里的 release（" + record.mbid + "）与请求的 MBID（" + ref.id + "）不同，以上面那条为准"
+      : null,
+    "选图判据是 types 与 front/back：Case Front 是正面再摄＝与 Front 重复画面，Back / Case Back 才是另一面；"
+      + "只查 HTTP 200 + image/* 就选图是本工具链明确禁止的做法（2026-09-25 封面复审教训）",
+    "index.json 不提供像素尺寸，判定尺寸门槛必须真的打开图片",
+  ].filter(Boolean).join("；");
+
+  return readResult(res, "coverartarchive", {
+    id: ref.id,
+    title: null,
+    image_url: fronts.length ? fronts[0].image_url : null,
+    image_page_url: url,
+    url: url,
+    kind: ref.kind,
+    mbid: ref.id,
+    release_of_record: record,
+    images: mapped,
+    front_count: fronts.length,
+    back_count: backs.length,
+    notes: notes,
+    rights_note: "CAA 的图由社区上传，逐张授权与来源不同；写入 pictures[] 前必须逐张核对授权与「这张图是不是这个版次自己的图」，不能整组照搬。",
+    raw: { kind: ref.kind, mbid: ref.id, release: record ? record.url : null, images: mapped },
+  });
+}
+
+// ───────────────────────── Kitsu ─────────────────────────
+
+const KITSU_BASE = "https://kitsu.io/api/edge";
+const KITSU_KINDS = ["anime", "manga"];
+
+/** Kitsu 的 titles 键是任意语种（en / en_jp / ja_jp / zh_cn / ko_kr …）；en_jp 是罗马音而不是语种。 */
+function kitsuLocaleKey(key) {
+  const k = String(key == null ? "" : key).trim().toLowerCase();
+  if (!k || k === "en_jp" || k === "en-jp") return null;
+  const parts = k.replace(/_/g, "-").split("-");
+  if (parts.length < 2) return parts[0];
+  return parts[0] + "-" + parts.slice(1).map((p) => p.toUpperCase()).join("-");
+}
+
+function kitsuImageBlock(img) {
+  if (!img || typeof img !== "object") return null;
+  const dims = img.meta && img.meta.dimensions && typeof img.meta.dimensions === "object" ? img.meta.dimensions : {};
+  const sizes = {};
+  for (const key of ["tiny", "small", "medium", "large", "original"]) {
+    const url = clean(img[key]);
+    if (!url) continue;
+    const d = dims[key] && typeof dims[key] === "object" ? dims[key] : null;
+    sizes[key] = {
+      url: url,
+      width: d && Number.isFinite(d.width) ? d.width : null,
+      height: d && Number.isFinite(d.height) ? d.height : null,
+      short_edge: d && Number.isFinite(d.width) && Number.isFinite(d.height) ? Math.min(d.width, d.height) : null,
+    };
+  }
+  return Object.keys(sizes).length ? sizes : null;
+}
+
+/**
+ * 解析 Kitsu 标识：裸数字 id，或 kitsu.io/anime/<id|slug>、kitsu.io/manga/<id|slug> 链接。
+ * 层级冲突（链接写 manga、操作是 kitsu.anime）抛 bad_input，不猜。
+ */
+export function normalizeKitsuRef(input, requestedKind) {
+  const raw = String(input == null ? "" : input).trim();
+  if (!raw) throw new ProviderError("bad_input", "kitsu", "缺少 Kitsu id 或链接");
+  const m = raw.match(/kitsu\.(?:io|app)\/(anime|manga)\/([^/?#\s]+)/i);
+  const urlKind = m ? m[1].toLowerCase() : null;
+  const wanted = KITSU_KINDS.includes(requestedKind) ? requestedKind : null;
+  if (urlKind && wanted && urlKind !== wanted) {
+    throw new ProviderError("bad_input", "kitsu",
+      "链接里的层级是 " + urlKind + "，但请求的操作是 kitsu." + wanted + "；两者不一致");
+  }
+  const kind = urlKind || wanted;
+  if (!kind) {
+    throw new ProviderError("bad_input", "kitsu", "必须指明层级：用 kitsu.anime 或 kitsu.manga，或给一条含 /anime/ 或 /manga/ 的链接");
+  }
+  const token = (m ? m[2] : raw).trim();
+  if (/^\d{1,12}$/.test(token)) {
+    if (Number(token) < 1) throw new ProviderError("bad_input", "kitsu", "Kitsu id 必须是正整数，实际：" + token);
+    return { kind: kind, id: String(Number(token)), slug: null };
+  }
+  if (/^[a-z0-9][a-z0-9-]{0,120}$/i.test(token) && !/^https?:/i.test(token)) {
+    return { kind: kind, id: null, slug: token.toLowerCase() };
+  }
+  throw new ProviderError("bad_input", "kitsu",
+    "无法解析 Kitsu 标识：" + raw.slice(0, 80) + "（需要数字 id、slug，或 kitsu.io/<anime|manga>/<id|slug> 链接）");
+}
+
+export function kitsuPageUrl(kind, idOrSlug) {
+  return "https://kitsu.io/" + kind + "/" + String(idOrSlug);
+}
+
+/** JSON:API 的 404 必须带 errors[].code=404 才算「提供方明确说没有」；否则按未知处理。 */
+function kitsuNotFoundCode(res) {
+  let codes = [];
+  try {
+    const body = JSON.parse(res.text);
+    if (body && Array.isArray(body.errors)) codes = body.errors.map((e) => String((e && e.code) || "")).filter(Boolean);
+  } catch {
+    return null;
+  }
+  return codes.length ? codes.join(",") : null;
+}
+
+function requireKitsuEntry(value, kind, expectedId, expectedSlug) {
+  const entry = requireObject(value, "kitsu", kind + " 条目");
+  if (entry.type !== kind || !/^[1-9]\d{0,11}$/.test(String(entry.id ?? ""))) {
+    throw new ProviderError("parse", "kitsu", "条目的 type 或 id 与请求层级不符", { retryable: false });
+  }
+  const attrs = requireObject(entry.attributes, "kitsu", kind + " attributes");
+  if ((expectedId && String(entry.id) !== expectedId) || (expectedSlug && attrs.slug !== expectedSlug)) {
+    throw new ProviderError("parse", "kitsu", "条目的身份标识与请求不一致", { retryable: false });
+  }
+  return entry;
+}
+
+function mapKitsuAttributes(attrs, kind, id) {
+  const a = requireObject(attrs, "kitsu", kind + " attributes");
+  const rawTitles = a.titles && typeof a.titles === "object" ? a.titles : {};
+  const titles = {};
+  for (const [key, value] of Object.entries(rawTitles)) {
+    const locale = kitsuLocaleKey(key);
+    const text = clean(value);
+    if (locale && text) titles[locale] = text;
+  }
+  const poster = kitsuImageBlock(a.posterImage);
+  const cover = kitsuImageBlock(a.coverImage);
+  const slug = clean(a.slug);
+  return {
+    id: String(id),
+    slug: slug,
+    title: clean(a.canonicalTitle),
+    titles: Object.keys(titles).length ? titles : null,
+    romaji: clean(rawTitles.en_jp || rawTitles["en-jp"]),
+    aliases: Array.isArray(a.abbreviatedTitles) ? a.abbreviatedTitles.map(clean).filter(Boolean) : [],
+    synopsis: clean(a.synopsis),
+    dates: {
+      start: isoDate(a.startDate), start_raw: clean(a.startDate),
+      end: isoDate(a.endDate), end_raw: clean(a.endDate),
+      next_release: clean(a.nextRelease),
+    },
+    subtype: clean(a.subtype),
+    status: clean(a.status),
+    episode_count: Number.isFinite(a.episodeCount) ? a.episodeCount : null,
+    episode_length: Number.isFinite(a.episodeLength) ? a.episodeLength : null,
+    total_length: Number.isFinite(a.totalLength) ? a.totalLength : null,
+    chapter_count: Number.isFinite(a.chapterCount) ? a.chapterCount : null,
+    volume_count: Number.isFinite(a.volumeCount) ? a.volumeCount : null,
+    age_rating: clean(a.ageRating),
+    age_rating_guide: clean(a.ageRatingGuide),
+    nsfw: a.nsfw === true,
+    average_rating: Number.isFinite(Number(a.averageRating)) && a.averageRating != null ? Number(a.averageRating) : null,
+    popularity_rank: Number.isFinite(a.popularityRank) ? a.popularityRank : null,
+    youtube_video_id: clean(a.youtubeVideoId),
+    poster: poster,
+    cover_banner: cover,
+    url: kitsuPageUrl(kind, slug || id),
+  };
+}
+
+function kitsuResultNotes(mapped, kind) {
+  const sourceHint = (mapped.synopsis || "").match(/\(Source:\s*([^)]{1,60})\)\s*$/i);
+  return [
+    "Kitsu 是社区聚合站，命中不等于权威：kind=" + kind + "、层级与身份锚点写入前仍须逐项核对",
+    sourceHint
+      ? "synopsis 末尾自带出处标注「Source: " + sourceHint[1].trim() + "」——那是简介的真实来源，按来源策略去核那一手页面，不要把 Kitsu 当出处"
+      : "synopsis 没有 (Source: …) 标注，出处不明，写入 summary 前必须另找一手来源",
+    "poster.meta.dimensions 给了各档宽高（见 poster.*.short_edge），按站内封面尺寸门槛判可用性；coverImage 是宽幅横幅不是海报，不作封面候选",
+    mapped.titles ? "titles 已按 BCP-47 归一（Kitsu 的 ja_jp/zh_cn → ja-JP/zh-CN）；en_jp 是罗马音，单列在 romaji，不要当译名写入" : null,
+    "relationships（cast/staff/genres/episodes）默认只给链接，需要时用 include= 另取，本连接器不自动展开",
+  ].filter(Boolean).join("；");
+}
+
+/** 按 id 或 slug 取单条 anime/manga。 */
+export async function fetchKitsuMedia(idOrUrl, opts) {
+  const o = opts || {};
+  const ref = normalizeKitsuRef(idOrUrl, o.kind);
+  let url;
+  let bySlug = false;
+  if (ref.id) {
+    url = KITSU_BASE + "/" + ref.kind + "/" + ref.id;
+  } else {
+    bySlug = true;
+    url = KITSU_BASE + "/" + ref.kind + "?" + new URLSearchParams({ "filter[slug]": ref.slug, "page[limit]": "2" }).toString();
+  }
+  const res = await httpRequest(url, Object.assign({ provider: "kitsu", accept: "application/vnd.api+json" }, o));
+
+  if (res.notFound) {
+    if (bySlug) {
+      throw new ProviderError("unavailable", "kitsu", "slug 检索端点返回 HTTP " + res.status + "，不能据此判定条目不存在",
+        { status: res.status, url: url, retryable: true });
+    }
+    const code = kitsuNotFoundCode(res);
+    if (code === null || !/(^|,)404(,|$)/.test(code)) {
+      throw new ProviderError("unavailable", "kitsu",
+        "HTTP " + res.status + " 但响应不是 JSON:API 的 404 错误体（errors[].code=" + (code || "无") + "）",
+        { status: res.status, url: url, retryable: true, hint: "只有 code=404 的 JSON:API 错误体才是「记录不存在」的明确答复" });
+    }
+    return readResult(res, "kitsu", {
+      found: false,
+      id: ref.id || ref.slug,
+      kind: ref.kind,
+      url: kitsuPageUrl(ref.kind, ref.id || ref.slug),
+      api_url: url,
+      notes: "Kitsu 明确答复：" + ref.kind + " " + (ref.id || ref.slug) + " 不存在（HTTP 404 / errors.code=404）。"
+        + "这只说明 Kitsu 没收录，不代表作品不存在——按来源策略换 Bangumi / AniList / 官方页核。"
+        + "注意 anime 与 manga 是两套独立编号，同一数字在两层指不同条目：换层重试前先用 kitsu.search 确认。",
+      raw: { kind: ref.kind, id: ref.id, slug: ref.slug, status: res.status, body: String(res.text || "").slice(0, 400) },
+    });
+  }
+
+  let data;
+  try {
+    data = JSON.parse(res.text);
+  } catch (err) {
+    throw new ProviderError("parse", "kitsu", "响应不是合法 JSON：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
+      { status: res.status, url: url, cause: err });
+  }
+
+  let entry = null;
+  if (bySlug) {
+    const hits = requireArrayField(data, "data", "kitsu", "slug 检索");
+    if (hits.length > 1) {
+      throw new ProviderError("parse", "kitsu", "slug=" + ref.slug + " 命中多条记录；请用 kitsu.search 确认数字 id", { retryable: false });
+    }
+    entry = hits.length ? requireObject(hits[0], "kitsu", "slug 条目") : null;
+  } else {
+    entry = requireObject(data, "kitsu", "详情").data;
+    requireObject(entry, "kitsu", "详情 data");
+  }
+  if (!entry) {
+    return readResult(res, "kitsu", {
+      found: false,
+      id: ref.id || ref.slug,
+      kind: ref.kind,
+      url: kitsuPageUrl(ref.kind, ref.slug),
+      api_url: url,
+      notes: "Kitsu 对 " + ref.kind + " slug=" + ref.slug + " 返回空结果集：该层级下没有这个 slug。"
+        + "anime 与 manga 是两套独立 slug 空间，换层重试前先用 kitsu.search 确认。",
+      raw: { kind: ref.kind, slug: ref.slug, status: res.status, body: String(res.text || "").slice(0, 400) },
+    });
+  }
+  entry = requireKitsuEntry(entry, ref.kind, ref.id, ref.slug);
+  const mapped = mapKitsuAttributes(entry.attributes, ref.kind, entry.id);
+
+  return readResult(res, "kitsu", Object.assign({}, mapped, {
+    kind: ref.kind,
+    external_ids: { kitsu: mapped.id },
+    image_url: mapped.poster && mapped.poster.large ? mapped.poster.large.url
+      : (mapped.poster && mapped.poster.original ? mapped.poster.original.url : null),
+    image_page_url: mapped.url,
+    notes: kitsuResultNotes(mapped, ref.kind),
+    rights_note: "图片托管在 media.kitsu.app，版权归原权利方；Kitsu 是社区聚合站，海报不等于官方发行版封面，写 pictures[] 前按字段来源策略核对具体版次。",
+    raw: entry,
+  }));
+}
+
+/** Kitsu 全文检索。meta.count=0 或 data 为空数组是明确的无命中。 */
+export async function searchKitsu(query, opts) {
+  const o = opts || {};
+  const raw = String(query == null ? "" : query).trim();
+  if (!raw) throw new ProviderError("bad_input", "kitsu", "检索词不能为空");
+  const kind = KITSU_KINDS.includes(o.kind) ? o.kind : "anime";
+  const limit = Number.isFinite(Number(o.limit)) && Number(o.limit) > 0 ? Math.min(20, Math.floor(Number(o.limit))) : 5;
+  const url = KITSU_BASE + "/" + kind + "?" + new URLSearchParams({ "filter[text]": raw, "page[limit]": String(limit) }).toString();
+  const res = await httpRequest(url, Object.assign({ provider: "kitsu", accept: "application/vnd.api+json" }, o));
+  if (res.notFound) {
+    throw new ProviderError("unavailable", "kitsu", "检索端点返回 HTTP " + res.status + "，不能据此判定无匹配条目",
+      { status: res.status, url: url, retryable: true });
+  }
+  let data;
+  try {
+    data = JSON.parse(res.text);
+  } catch (err) {
+    throw new ProviderError("parse", "kitsu", "检索响应不是合法 JSON：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
+      { status: res.status, url: url, cause: err });
+  }
+  const rows = requireArrayField(data, "data", "kitsu", "检索");
+  const total = data.meta && Number.isFinite(data.meta.count) ? data.meta.count : null;
+  const hits = rows.map((row) => {
+    const item = requireKitsuEntry(row, kind);
+    requireSearchItem(item, "kitsu", "检索", ["id"], ["attributes"]);
+    const attrs = item.attributes || {};
+    return {
+      id: String(item.id),
+      kind: kind,
+      slug: clean(attrs.slug),
+      title: clean(attrs.canonicalTitle),
+      titles_zh: clean(attrs.titles && attrs.titles.zh_cn),
+      titles_ja: clean(attrs.titles && attrs.titles.ja_jp),
+      romaji: clean(attrs.titles && attrs.titles.en_jp),
+      subtype: clean(attrs.subtype),
+      status: clean(attrs.status),
+      start_date: isoDate(attrs.startDate),
+      episode_count: Number.isFinite(attrs.episodeCount) ? attrs.episodeCount : null,
+      nsfw: attrs.nsfw === true,
+      url: kitsuPageUrl(kind, clean(attrs.slug) || item.id),
+      raw: attrs,
+    };
+  });
+  return readResult(res, "kitsu", {
+    found: hits.length > 0,
+    id: hits[0] ? hits[0].id : null,
+    title: hits[0] ? hits[0].title : null,
+    image_url: null,
+    url: hits[0] ? hits[0].url : url,
+    kind: kind,
+    notes: hits.length
+      ? "候选 " + hits.length + " 条（meta.count=" + (total == null ? "?" : total) + "，kind=" + kind + "，limit=" + limit + "）；检索结果是候选，写入前用 kitsu.anime/kitsu.manga 取全字段并核对身份锚点"
+      : "Kitsu 检索无命中（meta.count=" + (total == null ? "?" : total) + "，kind=" + kind + "）：换个检索词，或用 kitsu.manga 试另一层级；无命中不代表作品不存在",
+    rights_note: "检索结果只含题名与日期等索引字段，不含图片授权信息。",
+    raw: { kind: kind, query: raw, count: total, hits: hits },
+  });
+}
+
+// ───────────────────────── VNDB ─────────────────────────
+
+const VNDB_API = "https://api.vndb.org/kana";
+const VNDB_PREFIX = { vn: "v", release: "r", character: "c", staff: "s", producer: "p" };
+
+/**
+ * 权威字段清单（2026-10-11 用 GET /kana/schema 的 api_fields 逐个核过）。
+ * VNDB 严格校验 fields：写错字段名、或嵌套对象不给子字段，都会 HTTP 400 并指名是哪个字段。
+ * 已知易错点：vn **没有** original（用 alttitle / titles）；release 的 languages 与 media
+ * 必须写成 languages.lang,languages.title,mtl 与 media.medium,media.qty；staff **没有** birthday。
+ */
+export const VNDB_FIELDS = {
+  vn: "title,alttitle,aliases,titles.lang,titles.latin,titles.main,titles.official,titles.title,"
+    + "released,olang,languages,platforms,description,length,length_minutes,rating,popularity,votecount,"
+    + "image.id,image.url,image.thumbnail,image.sexual,image.violence,image.dims,"
+    + "developers.id,developers.name,developers.original,"
+    + "extlinks.id,extlinks.label,extlinks.name,extlinks.url",
+  release: "title,alttitle,released,minage,gtin,catalog,media.medium,media.qty,platforms,"
+    + "languages.lang,languages.title,languages.mtl,"
+    + "producers.id,producers.name,producers.developer,producers.publisher,"
+    + "vns.id,vns.title,vns.rtype,official,patch,notes,"
+    + "extlinks.id,extlinks.label,extlinks.name,extlinks.url",
+  character: "name,original,aliases,gender,sex,birthday,blood_type,description,"
+    + "image.id,image.url,image.sexual,image.violence,image.dims,"
+    // vns.release 是嵌套对象（schema: {_inherit:"/release"}），不给子字段会 HTTP 400；
+    // 这里只要「出现在哪些作品」，用 vns.id + vns.title 就够，不展开 release。
+    + "vns.id,vns.title,vns.role,vns.spoiler",
+  staff: "name,original,aliases.name,aliases.latin,aliases.aid,aliases.ismain,gender,description,"
+    + "extlinks.id,extlinks.name,extlinks.url",
+};
+
+/** 解析 VNDB 标识：v17 / 17 / https://vndb.org/v17；层级与操作不符时抛 bad_input。 */
+export function normalizeVndbId(input, kind) {
+  const p = "vndb";
+  const prefix = VNDB_PREFIX[kind];
+  if (!prefix) throw new ProviderError("bad_input", p, "未知的 VNDB 层级：" + kind);
+  const raw = String(input == null ? "" : input).trim();
+  if (!raw) throw new ProviderError("bad_input", p, "缺少 VNDB " + kind + " id");
+  const fromUrl = raw.match(/vndb\.org\/([vrcsp])(\d{1,8})(?:[/?#]|$)/i);
+  if (fromUrl) {
+    if (fromUrl[1].toLowerCase() !== prefix) {
+      throw new ProviderError("bad_input", p,
+        "链接里的层级是 " + fromUrl[1].toLowerCase() + "，但本操作要的是 " + prefix + "（" + kind + "）；层级不可互换");
+    }
+    return prefix + String(Number(fromUrl[2]));
+  }
+  if (/^\d{1,8}$/.test(raw)) return prefix + String(Number(raw));
+  if (new RegExp("^" + prefix + "\\d{1,8}$", "i").test(raw)) return prefix + String(Number(raw.slice(1)));
+  throw new ProviderError("bad_input", p,
+    "无法解析 VNDB " + kind + " id：" + raw.slice(0, 60) + "（需要 " + prefix + " 后跟数字、裸数字，或 vndb.org/" + prefix + "<数字> 链接）");
+}
+
+export function vndbPageUrl(kind, id) {
+  return "https://vndb.org/" + String(id);
+}
+
+/**
+ * released 用 00 表示未知的月/日：「2003-05-00」＝2003 年 5 月、「2003-00-00」＝2003 年。
+ * 直接丢给 isoDate 会把 00 当成合法月日，所以先按 VNDB 口径降级到能确证的精度。
+ */
+export function vndbReleased(value) {
+  const s = String(value == null ? "" : value).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return isoDate(s);
+  if (m[2] === "00") return m[3] === "00" ? m[1] : null;
+  if (m[3] === "00") return m[1] + "-" + m[2];
+  return s;
+}
+
+/** description 是 BBCode：机械去标签给出纯文本，原文一律保留在 raw 里。 */
+export function vndbStripBbcode(value) {
+  const s = String(value == null ? "" : value);
+  if (!s.trim()) return null;
+  const out = s
+    .replace(/\[url=[^\]]*\]([\s\S]*?)\[\/url\]/gi, "$1")
+    .replace(/\[(?:url|spoiler|quote|code|raw|b|i|u|s)(?:=[^\]]*)?\]/gi, "")
+    .replace(/\[\/(?:url|spoiler|quote|code|raw|b|i|u|s)\]/gi, "")
+    // 只清"长得像标签"的残留（纯字母标签名，可带 =参数）；不能按"方括号里 ≤40 字"一刀切——
+    // 那会把 [From Wikipedia] 这类**出处证据**一起吃掉，而它恰恰是最该留下的东西。
+    .replace(/\[[a-z]{1,12}(?:=[^\]]*)?\]/gi, "")
+    .replace(/\[\/[a-z]{1,12}\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return out || null;
+}
+
+async function vndbPost(endpoint, payload, o) {
+  const url = VNDB_API + "/" + endpoint;
+  // Content-Type 必须留住：Object.assign 里 o 在后会整体替换 headers，所以合并完再放回。
+  const headers = Object.assign({ "Content-Type": "application/json" }, o.headers || {});
+  let res;
+  try {
+    res = await httpRequest(url, Object.assign({
+      provider: "vndb",
+      method: "POST",
+      body: JSON.stringify(payload),
+      accept: "application/json",
+    }, o, { headers: headers }));
+  } catch (err) {
+    // 400 是 API 在指名字段/过滤器不合法：转成 bad_input 并给出可执行的下一步，别让人继续试错。
+    if (err instanceof ProviderError && err.kind === "http" && err.status === 400) {
+      throw new ProviderError("bad_input", "vndb",
+        "VNDB API 拒绝请求：" + err.message.replace(/^\[vndb\/http\]\s*/, ""),
+        {
+          status: 400, url: url, retryable: false,
+          hint: "字段名或 filters 形状不合法。嵌套对象必须显式给子字段（titles.lang,titles.title / media.medium,media.qty / languages.lang）。"
+            + "权威字段名用 vndb.schema 查；分页参数是 results 不是 count。",
+        });
+    }
+    throw err;
+  }
+  if (res.notFound) {
+    throw new ProviderError("unavailable", "vndb", "API 端点返回 HTTP " + res.status + "，不能据此判定空结果集",
+      { status: res.status, url: url, retryable: true });
+  }
+  let data;
+  try {
+    data = JSON.parse(res.text);
+  } catch (err) {
+    throw new ProviderError("parse", "vndb", "响应不是合法 JSON：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
+      { status: res.status, url: url, cause: err });
+  }
+  return { ...res, data };
+}
+
+function vndbResultSet(res, endpoint) {
+  const rows = requireArrayField(res.data, "results", "vndb", endpoint);
+  if (typeof res.data.more !== "boolean") {
+    throw new ProviderError("parse", "vndb", endpoint + " 响应缺少 boolean more", { retryable: false });
+  }
+  return { rows: rows, more: res.data.more };
+}
+
+function requireVndbSingle(rows, endpoint, expectedId) {
+  const row = requireObject(rows[0], "vndb", endpoint);
+  if (rows.length !== 1 || row.id !== expectedId) {
+    throw new ProviderError("parse", "vndb", endpoint + " 条目的身份标识与请求不一致", { retryable: false });
+  }
+  return row;
+}
+
+function vndbExtlinks(row) {
+  if (!Array.isArray(row.extlinks)) return null;
+  const out = row.extlinks.map((e) => ({
+    name: clean(e && e.name), label: clean(e && e.label), url: clean(e && e.url),
+  })).filter((e) => e.url);
+  return out.length ? out : null;
+}
+
+/** VN 条目：题名/别名/多语题名/发行日/平台/开发方/评分与封面（含社区性暴力投票数）。 */
+export async function fetchVndbVn(idOrUrl, opts) {
+  const o = opts || {};
+  const id = normalizeVndbId(idOrUrl, "vn");
+  const res = await vndbPost("vn", { filters: ["id", "=", id], results: 1, fields: VNDB_FIELDS.vn }, o);
+  const { rows } = vndbResultSet(res, "vn");
+  const url = vndbPageUrl("vn", id);
+  if (!rows.length) {
+    return readResult(res, "vndb", {
+      found: false, id: id, url: url,
+      notes: "VNDB 对 " + id + " 返回空结果集：该条目不存在或已被撤回。这只说明 VNDB 没有，不代表作品不存在。",
+      raw: { id: id, status: res.status, results: rows },
+    });
+  }
+  const row = requireVndbSingle(rows, "vn", id);
+  const titlesByLang = {};
+  const titleList = Array.isArray(row.titles) ? row.titles.map((t) => {
+    const lang = clean(t && t.lang);
+    const title = clean(t && t.title);
+    if (lang && title) titlesByLang[lang] = { title: title, latin: clean(t.latin), main: t.main === true, official: t.official === true };
+    return { lang: lang, title: title, latin: clean(t && t.latin), main: t && t.main === true, official: t && t.official === true };
+  }) : [];
+  const image = row.image && typeof row.image === "object" ? row.image : null;
+  const released = vndbReleased(row.released);
+  const developers = Array.isArray(row.developers)
+    ? row.developers.map((d) => ({ id: clean(d && d.id), name: clean(d && d.name), original: clean(d && d.original) })).filter((d) => d.name)
+    : [];
+
+  return readResult(res, "vndb", {
+    id: id,
+    title: clean(row.title),
+    titles: Object.keys(titlesByLang).length ? titlesByLang : null,
+    image_url: clean(image && image.url),
+    image_page_url: url,
+    dates: { release: released, release_raw: clean(row.released) },
+    external_ids: { vndb: id },
+    url: url,
+    alttitle: clean(row.alttitle),
+    aliases: Array.isArray(row.aliases) ? row.aliases.map(clean).filter(Boolean) : [],
+    title_variants: titleList,
+    description: clean(row.description),
+    description_text: vndbStripBbcode(row.description),
+    languages: Array.isArray(row.languages) ? row.languages.map(clean).filter(Boolean) : [],
+    original_language: clean(row.olang),
+    platforms: Array.isArray(row.platforms) ? row.platforms.map(clean).filter(Boolean) : [],
+    length: Number.isFinite(row.length) ? row.length : null,
+    length_minutes: Number.isFinite(row.length_minutes) ? row.length_minutes : null,
+    rating: Number.isFinite(row.rating) ? row.rating : null,
+    popularity: Number.isFinite(row.popularity) ? row.popularity : null,
+    votecount: Number.isFinite(row.votecount) ? row.votecount : null,
+    developers: developers,
+    extlinks: vndbExtlinks(row),
+    image_meta: image ? {
+      id: clean(image.id), thumbnail: clean(image.thumbnail),
+      dims: image.dims || null,
+      sexual_votes: Number.isFinite(image.sexual) ? image.sexual : null,
+      violence_votes: Number.isFinite(image.violence) ? image.violence : null,
+    } : null,
+    notes: [
+      "released 原文「" + (clean(row.released) || "无") + "」→ " + (released || "无法确证，精度见原文")
+      + "（VNDB 用 00 表示未知的月/日）",
+      "description 是 BBCode，且常带 [url=…Wikipedia[/url]] 这类出处标注：那既是转写义务，也是简介的真实来源线索，按来源策略去核那一手页面",
+      "image.sexual / image.violence 是社区投票数，不是分级结论；dims 是像素宽高，可据此判封面尺寸门槛",
+      "本操作只给 VN 层；版次（品番/条码/载体/权利方分工）要用 vndb.releases 另取",
+    ].join("；"),
+    rights_note: "VNDB 图片由社区上传，逐张授权不同；写入 pictures[] 前逐张核对，不能只看 HTTP 200。",
+    raw: row,
+  });
+}
+
+/**
+ * 某 VN 下的版次列表。这里是 VNDB 最值钱的部分：gtin（条码）、catalog（品番）、
+ * media（载体与枚数）、producers 的 developer/publisher 分工、minage（分级）都是社区转录字段。
+ */
+export async function fetchVndbReleases(vnIdOrUrl, opts) {
+  const o = opts || {};
+  const vnId = normalizeVndbId(vnIdOrUrl, "vn");
+  const res = await vndbPost("release", {
+    filters: ["vn", "=", ["id", "=", vnId]],
+    results: Number.isFinite(Number(o.limit)) && Number(o.limit) > 0 ? Math.min(50, Math.floor(Number(o.limit))) : 25,
+    fields: VNDB_FIELDS.release,
+  }, o);
+  const { rows, more } = vndbResultSet(res, "release");
+  if (!rows.length) {
+    return readResult(res, "vndb", {
+      found: false, id: vnId, url: vndbPageUrl("vn", vnId),
+      notes: "VNDB 对 " + vnId + " 返回空版次集：该 VN 没有登记任何 release。不能据此断定它没有发行版——官方商品页仍可能刊出。",
+      raw: { vn: vnId, status: res.status, results: rows },
+    });
+  }
+  const releases = rows.map((entry) => {
+    const row = requireObject(entry, "vndb", "release");
+    if (!/^r[1-9]\d{0,7}$/.test(String(row.id ?? "")) || !Array.isArray(row.vns) || !row.vns.some(vn => vn && vn.id === vnId)) {
+      throw new ProviderError("parse", "vndb", "release 的标识或所属 VN 与请求不一致", { retryable: false });
+    }
+    const gtin = clean(row.gtin);
+    return {
+      id: clean(row.id),
+      title: clean(row.title),
+      alttitle: clean(row.alttitle),
+      released: vndbReleased(row.released),
+      released_raw: clean(row.released),
+      minage: Number.isFinite(row.minage) ? row.minage : null,
+      gtin: gtin,
+      gtin_scheme: gtin ? (GTIN_SCHEMES[gtin.length] || null) : null,
+      gtin_checksum_valid: gtin ? gtinCheckDigitValid(gtin) : null,
+      catalog_number: clean(row.catalog),
+      media: Array.isArray(row.media)
+        ? row.media.map((m) => ({ medium: clean(m && m.medium), qty: Number.isFinite(m && m.qty) ? m.qty : null })).filter((m) => m.medium)
+        : [],
+      platforms: Array.isArray(row.platforms) ? row.platforms.map(clean).filter(Boolean) : [],
+      languages: Array.isArray(row.languages)
+        ? row.languages.map((l) => ({ lang: clean(l && l.lang), title: clean(l && l.title), machine_translation: l && l.mtl === true }))
+        : [],
+      producers: Array.isArray(row.producers)
+        ? row.producers.map((p) => ({ id: clean(p && p.id), name: clean(p && p.name), developer: p && p.developer === true, publisher: p && p.publisher === true })).filter((p) => p.name)
+        : [],
+      official: row.official === true,
+      patch: row.patch === true,
+      notes: clean(row.notes),
+      extlinks: vndbExtlinks(row),
+      url: row.id ? vndbPageUrl("release", row.id) : null,
+      raw: row,
+    };
+  });
+  return readResult(res, "vndb", {
+    found: true,
+    id: vnId,
+    title: null,
+    url: vndbPageUrl("vn", vnId),
+    releases: releases,
+    release_count: releases.length,
+    notes: [
+      "VN " + vnId + " 下 " + releases.length + " 个版次" + (more ? "（more=true，还有更多，用 limit 提高上限或分页）" : ""),
+      "gtin 是条码、catalog 是品番、media 是载体与枚数：这三项是建 Release / Medium 的社区候选，身份判断需核原始出处；gtin_checksum_valid 只是校验位提示，不是存在性证明",
+      "producers 里 publisher=true 才是发行方、developer=true 是开发方，二者常是同一家也可能不同；建 agent 与署名关系前按来源策略核对权利链",
+      "minage 是 VNDB 的年龄分级数字，不等于站内 content_rating 词表；映射前查 definitions",
+      "官方/同人（official）与补丁（patch）会影响它算不算一个独立版次，写入前判断",
+    ].join("；"),
+    rights_note: "版次字段由 VNDB 社区维护、多来自官方页转录；写入前与厂牌官方商品页对一次，冲突时以权利方页面为准。",
+    raw: { vn: vnId, more: more, results: releases.map((r) => r.raw) },
+  });
+}
+
+/** 角色条目。 */
+export async function fetchVndbCharacter(idOrUrl, opts) {
+  const o = opts || {};
+  const id = normalizeVndbId(idOrUrl, "character");
+  const res = await vndbPost("character", { filters: ["id", "=", id], results: 1, fields: VNDB_FIELDS.character }, o);
+  const { rows } = vndbResultSet(res, "character");
+  const url = vndbPageUrl("character", id);
+  if (!rows.length) {
+    return readResult(res, "vndb", {
+      found: false, id: id, url: url,
+      notes: "VNDB 对角色 " + id + " 返回空结果集：该条目不存在。",
+      raw: { id: id, status: res.status, results: rows },
+    });
+  }
+  const row = requireVndbSingle(rows, "character", id);
+  const image = row.image && typeof row.image === "object" ? row.image : null;
+  return readResult(res, "vndb", {
+    id: id,
+    title: clean(row.name),
+    image_url: clean(image && image.url),
+    image_page_url: url,
+    external_ids: { vndb_character: id },
+    url: url,
+    original_name: clean(row.original),
+    aliases: Array.isArray(row.aliases) ? row.aliases.map(clean).filter(Boolean) : [],
+    gender: clean(row.gender),
+    sex: clean(row.sex),
+    birthday: clean(row.birthday),
+    blood_type: clean(row.blood_type),
+    description: clean(row.description),
+    description_text: vndbStripBbcode(row.description),
+    appears_in: Array.isArray(row.vns)
+      ? row.vns.map((v) => ({
+        id: clean(v && v.id),
+        title: clean(v && v.title),
+        role: clean(v && v.role),
+        spoiler: Number.isFinite(v && v.spoiler) ? v.spoiler : null,
+      }))
+      : [],
+    image_meta: image ? {
+      id: clean(image.id),
+      dims: image.dims || null,
+      sexual_votes: Number.isFinite(image.sexual) ? image.sexual : null,
+      violence_votes: Number.isFinite(image.violence) ? image.violence : null,
+    } : null,
+    notes: "角色名 VNDB 用 name（多为拉丁转写）+ original（原文）两栏；写站内 agent 时按语种键归位，别把转写当原文。gender 是身份表述、sex 是生理表述，VNDB 两者分列，不要混填。appears_in 里的 spoiler 是剧透等级，公开简介不要引用高剧透条目。",
+    rights_note: "角色图由社区上传，逐张授权不同；配角立绘常低于站内尺寸门槛，dims 是像素宽高，先量再写。",
+    raw: row,
+  });
+}
+
+/** 制作人员条目。注意 staff 没有 birthday 字段（schema 核过）。 */
+export async function fetchVndbStaff(idOrUrl, opts) {
+  const o = opts || {};
+  const id = normalizeVndbId(idOrUrl, "staff");
+  const res = await vndbPost("staff", { filters: ["id", "=", id], results: 1, fields: VNDB_FIELDS.staff }, o);
+  const { rows } = vndbResultSet(res, "staff");
+  const url = vndbPageUrl("staff", id);
+  if (!rows.length) {
+    return readResult(res, "vndb", {
+      found: false, id: id, url: url,
+      notes: "VNDB 对职员 " + id + " 返回空结果集：该条目不存在。",
+      raw: { id: id, status: res.status, results: rows },
+    });
+  }
+  const row = requireVndbSingle(rows, "staff", id);
+  const aliases = Array.isArray(row.aliases)
+    ? row.aliases.map((a) => ({ aid: clean(a && a.aid), name: clean(a && a.name), latin: clean(a && a.latin), is_main: a && a.ismain === true }))
+    : [];
+  return readResult(res, "vndb", {
+    id: id,
+    title: clean(row.name),
+    external_ids: { vndb_staff: id },
+    url: url,
+    original_name: clean(row.original),
+    aliases: aliases,
+    gender: clean(row.gender),
+    description: clean(row.description),
+    description_text: vndbStripBbcode(row.description),
+    extlinks: vndbExtlinks(row),
+    notes: "name 是拉丁转写、original 是原文；aliases 里 ismain=true 的那条才是主名。VNDB 的 staff 没有生日字段，别把别处看到的生日当成 VNDB 佐证。",
+    raw: row,
+  });
+}
+
+/** 权威字段名与枚举：给 fields/filters 报错时查，不必试错。参数被忽略但不能为空。 */
+export async function fetchVndbSchema(_arg, opts) {
+  const o = opts || {};
+  const url = VNDB_API + "/schema";
+  const res = await httpRequest(url, Object.assign({ provider: "vndb", accept: "application/json" }, o));
+  if (res.notFound) {
+    throw new ProviderError("unavailable", "vndb", "schema 端点返回 HTTP " + res.status,
+      { status: res.status, url: url, retryable: true });
+  }
+  let data;
+  try {
+    data = JSON.parse(res.text);
+  } catch (err) {
+    throw new ProviderError("parse", "vndb", "schema 响应不是合法 JSON：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
+      { status: res.status, url: url, cause: err });
+  }
+  const body = requireObject(data, "vndb", "schema");
+  const apiFields = requireObject(body.api_fields, "vndb", "schema.api_fields");
+  const endpoints = Object.keys(apiFields).sort();
+  const fields = {};
+  for (const ep of endpoints) {
+    fields[ep] = Object.keys(apiFields[ep] || {}).sort();
+  }
+  return readResult(res, "vndb", {
+    found: true,
+    id: null,
+    title: null,
+    url: url,
+    endpoints: endpoints,
+    fields: fields,
+    enums: body.enums && typeof body.enums === "object" ? Object.keys(body.enums).sort() : [],
+    extlinks: body.extlinks && typeof body.extlinks === "object" ? Object.keys(body.extlinks).sort() : [],
+    notes: "这是 VNDB API v2 的权威字段清单：fields 里嵌套对象（值为 object）必须显式给子字段，否则 HTTP 400。"
+      + "分页参数是 results 不是 count。本连接器实际使用的字段见 VNDB_FIELDS。",
+    raw: body,
+  });
+}
+
+// ───────────────────────── OpenBD ─────────────────────────
+
+const OPENBD_BASE = "https://api.openbd.jp/v1";
+
+/** "201612" → "2016-12"，"20161210" → "2016-12-10"，"2016" → "2016"；其余不猜。 */
+export function openbdPubdate(value) {
+  const s = String(value == null ? "" : value).trim();
+  if (/^\d{8}$/.test(s)) return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
+  if (/^\d{6}$/.test(s)) return s.slice(0, 4) + "-" + s.slice(4, 6);
+  if (/^\d{4}$/.test(s)) return s;
+  return isoDate(s);
+}
+
+function openbdOnixPaths(onix) {
+  const o = onix && typeof onix === "object" ? onix : {};
+  const desc = o.DescriptiveDetail && typeof o.DescriptiveDetail === "object" ? o.DescriptiveDetail : {};
+  const titleElement = desc.TitleDetail && desc.TitleDetail.TitleElement ? desc.TitleDetail.TitleElement : null;
+  const titleText = titleElement && titleElement.TitleText ? titleElement.TitleText : null;
+  const contributors = Array.isArray(desc.Contributor) ? desc.Contributor : [];
+  const collection = desc.Collection && desc.Collection.TitleDetail && Array.isArray(desc.Collection.TitleDetail.TitleElement)
+    ? desc.Collection.TitleDetail.TitleElement : [];
+  const pub = o.PublishingDetail && typeof o.PublishingDetail === "object" ? o.PublishingDetail : {};
+  const supply = o.ProductSupply && o.ProductSupply.SupplyDetail ? o.ProductSupply.SupplyDetail : {};
+  const prices = Array.isArray(supply.Price) ? supply.Price : [];
+  return {
+    record_reference: clean(o.RecordReference),
+    notification_type: clean(o.NotificationType),
+    title_text: clean(titleText && titleText.content),
+    title_collationkey: clean(titleText && titleText.collationkey),
+    subtitle: clean(desc.TitleDetail && desc.TitleDetail.TitleElement && desc.TitleDetail.TitleElement.Subtitle
+      ? desc.TitleDetail.TitleElement.Subtitle.content : null),
+    contributors: contributors.map((c) => ({
+      sequence: clean(c && c.SequenceNumber),
+      roles: Array.isArray(c && c.ContributorRole) ? c.ContributorRole.map(clean).filter(Boolean) : [],
+      name: clean(c && c.PersonName && c.PersonName.content),
+      name_collationkey: clean(c && c.PersonName && c.PersonName.collationkey),
+      inverted: clean(c && c.PersonNameInverted && c.PersonNameInverted.content),
+    })).filter((c) => c.name || c.inverted),
+    collection: collection.map((el) => ({
+      part_number: clean(el && el.PartNumber),
+      title: clean(el && el.TitleText && el.TitleText.content),
+      level: clean(el && el.TitleElementLevel),
+    })).filter((c) => c.title),
+    imprint: clean(pub.Imprint && pub.Imprint.ImprintName),
+    publisher: clean(pub.Publisher && (Array.isArray(pub.Publisher) ? null : pub.Publisher.PublisherName)),
+    publishing_dates: Array.isArray(pub.PublishingDate)
+      ? pub.PublishingDate.map((d) => ({ role: clean(d && d.PublishingDateRole), date: clean(d && d.Date), normalized: openbdPubdate(d && d.Date) }))
+      : [],
+    availability: clean(supply.ProductAvailability),
+    prices: prices.map((p) => ({
+      type: clean(p && p.PriceType), currency: clean(p && p.CurrencyCode),
+      amount: clean(p && p.PriceAmount),
+    })),
+  };
+}
+
+function isbnIdentity(value) {
+  const compact = String(value ?? "").replace(/[\s-]/g, "").toUpperCase();
+  if (ISBN_13_SHAPE.test(compact)) return compact;
+  if (!ISBN_10_SHAPE.test(compact)) return null;
+  const base = "978" + compact.slice(0, 9);
+  const sum = Array.from(base).reduce((total, digit, index) => total + Number(digit) * (index % 2 ? 3 : 1), 0);
+  return base + String((10 - sum % 10) % 10);
+}
+
+function requireOpenbdIdentity(record, expectedIsbn) {
+  const anchors = [];
+  if (record.summary && record.summary.isbn != null) anchors.push(record.summary.isbn);
+  const onix = record.onix && typeof record.onix === "object" ? record.onix : {};
+  if (isbnIdentity(onix.RecordReference)) anchors.push(onix.RecordReference);
+  if (Array.isArray(onix.ProductIdentifier)) {
+    for (const identifier of onix.ProductIdentifier) {
+      if (identifier && ["02", "03", "15"].includes(String(identifier.ProductIDType))) anchors.push(identifier.IDValue);
+    }
+  }
+  const expected = isbnIdentity(expectedIsbn);
+  if (!anchors.length || anchors.some(value => isbnIdentity(value) !== expected)) {
+    throw new ProviderError("parse", "openbd", "书目记录的 ISBN 缺失或与请求不一致", { retryable: false });
+  }
+}
+
+/**
+ * 按 ISBN 取 OpenBD 书目记录。查无是 HTTP 200 + [null]；HTTP 404 说明**路径**不对
+ * （端点是查询参数 ?isbn=，不是 /get/{isbn}），绝不能映射成 found:false。
+ */
+export async function lookupOpenbdByIsbn(isbnOrUrl, opts) {
+  const o = opts || {};
+  const isbn = normalizeIsbn(isbnOrUrl, "openbd");
+  const url = OPENBD_BASE + "/get?" + new URLSearchParams({ isbn: isbn }).toString();
+  const res = await httpRequest(url, Object.assign({ provider: "openbd", accept: "application/json" }, o));
+
+  if (res.notFound) {
+    throw new ProviderError("unavailable", "openbd",
+      "HTTP " + res.status + "：OpenBD 的查询端点是 /v1/get?isbn=<ISBN>，路径形态不对时才会 404",
+      { status: res.status, url: url, retryable: false, hint: "查无此书是 HTTP 200 + [null]，不是 404；不要把 404 当成「这本书不存在」" });
+  }
+
+  let rows;
+  try {
+    rows = JSON.parse(res.text);
+  } catch (err) {
+    throw new ProviderError("parse", "openbd", "响应不是合法 JSON：" + String(res.text).replace(/\s+/g, " ").slice(0, 160),
+      { status: res.status, url: url, cause: err });
+  }
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    throw new ProviderError("parse", "openbd", "单 ISBN 响应必须是 [记录] 或 [null]，且恰有一项",
+      { status: res.status, url: url });
+  }
+  const checksum = isbnCheckDigit(isbn);
+
+  if (rows[0] === null) {
+    return readResult(res, "openbd", {
+      found: false,
+      id: isbn,
+      url: url,
+      external_ids: { openbd: isbn },
+      notes: "OpenBD 对 ISBN " + isbn + " 返回 [null]：没有收录。"
+        + (checksum.valid === false ? "另外该 ISBN 校验位不通过（" + checksum.scheme + "），先确认这串数字是不是写错了。" : "")
+        + "OpenBD 只收日本出版物——台版、繁中版、简体引进版返回 [null] 是收录范围问题，不是站点故障，"
+        + "更不能据此判定该书不存在；繁中版走台灣角川官方商店，简体版另找版元页。",
+      raw: { isbn: isbn, status: res.status, body: rows, checksum: checksum },
+    });
+  }
+
+  const record = requireObject(rows[0], "openbd", "记录");
+  requireOpenbdIdentity(record, isbn);
+  const summary = record.summary && typeof record.summary === "object" ? record.summary : {};
+  const onix = openbdOnixPaths(record.onix);
+  const hanmoto = record.hanmoto && typeof record.hanmoto === "object" ? record.hanmoto : null;
+  const pubdates = onix.publishing_dates.filter((d) => d.normalized);
+  const cover = clean(summary.cover);
+  // summary.volume 是 ONIX 的 Collection PartNumber，也就是**丛书序号**而不是巻号：
+  // 实测 9784048923514 的 volume=3159（電撃文庫第 3159 号），真正的巻号 10 只在题名
+  // 「僕と彼女のゲーム戦争. 10」里。叫 volume 会让代理把丛书序号当巻号写进站内。
+  const collectionPartNumber = clean(summary.volume);
+  const series = clean(summary.series);
+
+  return readResult(res, "openbd", {
+    id: isbn,
+    title: clean(summary.title) || onix.title_text,
+    image_url: cover,
+    // OpenBD 没有可核读的人类页面：www.openbd.jp 本机实测 http=000，/v1/coverage 又会忽略 isbn
+    // 参数返回全量清单（实测 59MB）。证据 URL 就用实际读到的这个 API 地址。
+    image_page_url: null,
+    dates: {
+      publish: openbdPubdate(summary.pubdate) || (pubdates[0] ? pubdates[0].normalized : null),
+      publish_raw: clean(summary.pubdate),
+      candidates: pubdates,
+    },
+    external_ids: { openbd: isbn },
+    url: url,
+    isbn: isbn,
+    isbn_checksum: checksum,
+    collection_part_number: collectionPartNumber,
+    series: series,
+    publisher: clean(summary.publisher) || onix.imprint,
+    imprint: onix.imprint,
+    authors: Array.isArray(summary.author) ? summary.author.map(clean).filter(Boolean)
+      : (clean(summary.author) ? [clean(summary.author)] : onix.contributors.map((c) => c.name).filter(Boolean)),
+    onix: onix,
+    hanmoto: hanmoto,
+    prices: onix.prices,
+    notes: [
+      "summary 是 OpenBD 规整后的值，onix 是完整原文；两者不一致时以 onix 逐字核对，别只信 summary",
+      "summary.title 可能缺副题或标点（实测電撃文庫某卷少一个「.」）：题名以版元商品页 h1 为准，OpenBD 只用来复核巻号·丛书·刊行年月",
+      collectionPartNumber
+        ? "collection_part_number=" + collectionPartNumber + " 是**丛书序号**（ONIX Collection PartNumber，本次丛书＝"
+          + (series || "未给") + "），不是巻号；巻号只出现在题名文字里（本例「. 10」），要写 volume 字段请从版元商品页逐字确认，不要把丛书序号当巻号"
+        : null,
+      "author 是 ONIX 倒装形（实测「師走,トオル」＝姓,名），写站内 agent 前按语种与姓名顺序核对",
+      pubdates.length
+        ? "PublishingDate 的 role 是 ONIX 代码（本次：" + pubdates.map((d) => d.role).join(",") + "），连接器不猜代码含义，原样给出；判定 edition_date 前先确认用的是哪个 role"
+        : "本次响应没有可归一的 PublishingDate",
+      cover ? "summary.cover 有值" : "summary.cover 为空（cover.openbd.jp/<isbn>.jpg 在无封面时 404）：OpenBD 没有封面不代表该版次没有封面，去版元商品页找",
+      checksum.valid === false ? "ISBN 校验位不通过（" + checksum.scheme + "）：先核对这串数字，不要照写进站内" : null,
+    ].filter(Boolean).join("；"),
+    rights_note: "OpenBD 是书目登记数据（题名/丛书/刊行年月/价格），不含图片授权；封面另按来源策略核。",
+    raw: record,
+  });
+}
+
+// ───────────────────────── Project Gutenberg ─────────────────────────
+
+const GUTENBERG_BASE = "https://www.gutenberg.org";
+
+/** 解析 ebook id：1513 / ebooks/1513 / https://www.gutenberg.org/ebooks/1513 / …/ebooks/1513.html.images */
+export function normalizeGutenbergId(input) {
+  const raw = String(input == null ? "" : input).trim();
+  if (!raw) throw new ProviderError("bad_input", "gutenberg", "缺少 ebook id 或链接");
+  const m = raw.match(/gutenberg\.org\/(?:ebooks|files|cache\/epub)\/(\d{1,7})(?:[./?#]|$)/i) || raw.match(/^ebooks\/(\d{1,7})$/i);
+  const id = m ? m[1] : (/^\d{1,7}$/.test(raw) ? raw : null);
+  if (!id) {
+    throw new ProviderError("bad_input", "gutenberg",
+      "无法解析 Gutenberg ebook id：" + raw.slice(0, 80) + "（需要纯数字 id，或 gutenberg.org/ebooks/<id> 链接）");
+  }
+  if (Number(id) < 1) throw new ProviderError("bad_input", "gutenberg", "ebook id 必须是正整数，实际：" + id);
+  return String(Number(id));
+}
+
+export function gutenbergRdfUrl(id) {
+  return GUTENBERG_BASE + "/cache/epub/" + id + "/pg" + id + ".rdf";
+}
+
+export function gutenbergPageUrl(id) {
+  return GUTENBERG_BASE + "/ebooks/" + id;
+}
+
+/** XML 实体还原，但不像 clean() 那样吞掉标签与换行结构。 */
+function xmlText(value) {
+  const s = String(value == null ? "" : value)
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, "&")
+    .trim();
+  return s || null;
+}
+
+function rdfBlocks(text, tag) {
+  const out = [];
+  const re = new RegExp("<" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + tag + ">", "g");
+  let m = re.exec(String(text || ""));
+  while (m) { out.push(m[1]); m = re.exec(String(text || "")); }
+  return out;
+}
+
+function rdfValue(block, tag) {
+  const m = String(block || "").match(new RegExp("<" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + tag + ">"));
+  return m ? xmlText(m[1]) : null;
+}
+
+function rdfResourceAttr(block, tag) {
+  const m = String(block || "").match(new RegExp("<" + tag + "(?:\\s[^>]*?)?rdf:resource=\"([^\"]+)\""));
+  return m ? m[1] : null;
+}
+
+function parseGutenbergAgent(block) {
+  const about = (String(block).match(/<pgterms:agent\s+rdf:about="([^"]+)"/) || [])[1] || null;
+  const aliases = [];
+  const re = /<pgterms:alias>([\s\S]*?)<\/pgterms:alias>/g;
+  let m = re.exec(String(block));
+  while (m) { const v = xmlText(m[1]); if (v) aliases.push(v); m = re.exec(String(block)); }
+  return {
+    name: rdfValue(block, "pgterms:name"),
+    birthdate: rdfValue(block, "pgterms:birthdate"),
+    deathdate: rdfValue(block, "pgterms:deathdate"),
+    aliases: aliases,
+    webpage: rdfResourceAttr(block, "pgterms:webpage"),
+    agent_url: about ? GUTENBERG_BASE + "/" + String(about).replace(/^\/+/, "") : null,
+  };
+}
+
+/**
+ * 解析 pg{id}.rdf。日期一律取 RDF 的 dcterms:issued：同一本书的 HTML 页面里
+ * RDFa content 属性是交叉错位的（实测 1513：property="dcterms:issued" content="2025-09-18"
+ * 其实是最后更新日，property="dcterms:modified" content="1998-11-01" 才是发行日）。
+ */
+export function parseGutenbergRdf(text, expectedId) {
+  const body = String(text == null ? "" : text);
+  if (!/<pgterms:ebook/i.test(body)) {
+    throw new ProviderError("parse", "gutenberg",
+      "响应不是 Gutenberg 的 ebook RDF（缺 pgterms:ebook 根元素）：" + body.replace(/\s+/g, " ").slice(0, 160),
+      { retryable: false });
+  }
+  const about = (body.match(/<pgterms:ebook\b[^>]*\brdf:about=["']([^"']+)["']/i) || [])[1] || null;
+  const fromAbout = about ? String(about).match(/^(?:https?:\/\/www\.gutenberg\.org\/)?ebooks\/([1-9]\d*)$/) : null;
+  if (!fromAbout) {
+    throw new ProviderError("parse", "gutenberg", "RDF 缺少可识别的 ebook rdf:about 身份标识", { retryable: false });
+  }
+  const id = fromAbout[1];
+  if (expectedId && id && String(id) !== String(expectedId)) {
+    throw new ProviderError("parse", "gutenberg",
+      "RDF 里的 ebook id（" + id + "）与请求的（" + expectedId + "）不一致，拒绝按错身份写入", { retryable: false });
+  }
+
+  const languages = rdfBlocks(body, "dcterms:language")
+    .map((b) => rdfValue(b, "rdf:value")).filter(Boolean);
+  const subjects = rdfBlocks(body, "dcterms:subject").map((b) => {
+    const member = rdfResourceAttr(b, "dcam:memberOf");
+    return {
+      scheme: member ? String(member).split("/").pop() : null,
+      value: rdfValue(b, "rdf:value"),
+    };
+  }).filter((s) => s.value);
+  const bookshelves = rdfBlocks(body, "pgterms:bookshelf")
+    .map((b) => rdfValue(b, "rdf:value")).filter(Boolean);
+  const formats = rdfBlocks(body, "dcterms:hasFormat").map((b) => {
+    const file = (String(b).match(/<pgterms:file\s+rdf:about="([^"]+)"/) || [])[1] || null;
+    const extent = rdfValue(b, "dcterms:extent");
+    const mime = rdfValue(b, "rdf:value");
+    return { url: file, extent: extent && /^\d+$/.test(extent) ? Number(extent) : (extent || null), format: mime };
+  }).filter((f) => f.url);
+
+  return {
+    id: id,
+    title: rdfValue(body, "dcterms:title"),
+    issued: rdfValue(body, "dcterms:issued"),
+    rights: rdfValue(body, "dcterms:rights"),
+    publisher: rdfValue(body, "dcterms:publisher"),
+    license: rdfResourceAttr(body, "dcterms:license"),
+    languages: languages,
+    subjects: subjects,
+    bookshelves: bookshelves,
+    creators: rdfBlocks(body, "dcterms:creator").map(parseGutenbergAgent).filter((a) => a.name),
+    contributors: rdfBlocks(body, "dcterms:contributor").map(parseGutenbergAgent).filter((a) => a.name),
+    formats: formats,
+  };
+}
+
+/** 按 ebook id 取书目。日期取 RDF（页面 HTML 的 RDFa content 属性交叉错位）。 */
+export async function fetchGutenbergEbook(idOrUrl, opts) {
+  const o = opts || {};
+  const id = normalizeGutenbergId(idOrUrl);
+  const url = gutenbergRdfUrl(id);
+  const res = await httpRequest(url, Object.assign({
+    provider: "gutenberg", accept: "application/rdf+xml, application/xml;q=0.9, */*;q=0.8",
+  }, o));
+  const page = gutenbergPageUrl(id);
+  if (res.notFound) {
+    return readResult(res, "gutenberg", {
+      found: false, id: id, url: page,
+      notes: "Gutenberg 对 ebook " + id + " 返回 HTTP " + res.status + "：该编号没有电子书（编号被撤回或不存在）。"
+        + "这只说明 Gutenberg 没有，不代表作品本身不存在。",
+      raw: { id: id, status: res.status, body: String(res.text || "").slice(0, 300) },
+    });
+  }
+  const record = parseGutenbergRdf(res.text, id);
+  const issued = isoDate(record.issued);
+  const rdfCovers = record.formats.filter((format) => /^image\//i.test(format.format || "")
+    && /^https?:\/\//i.test(format.url || ""));
+  const coverSmall = rdfCovers.find((format) => /\.cover\.small\./i.test(format.url))?.url || null;
+  const coverMedium = rdfCovers.find((format) => /\.cover\.medium\./i.test(format.url))?.url || null;
+
+  return readResult(res, "gutenberg", {
+    id: id,
+    title: record.title,
+    image_url: coverMedium || coverSmall || null,
+    image_page_url: page,
+    dates: { release: issued, release_raw: record.issued },
+    external_ids: { gutenberg: id },
+    url: page,
+    rdf_url: url,
+    languages: record.languages,
+    publisher: record.publisher,
+    creators: record.creators,
+    contributors: record.contributors,
+    subjects: record.subjects,
+    bookshelves: record.bookshelves,
+    formats: record.formats,
+    rights: record.rights,
+    license_url: record.license && !/^https?:/i.test(record.license)
+      ? GUTENBERG_BASE + "/" + String(record.license).replace(/^\/+/, "")
+      : (record.license || null),
+    cover_candidates: { small: coverSmall, medium: coverMedium, rdf_formats: rdfCovers },
+    notes: [
+      "发行日取 RDF 的 dcterms:issued（" + (record.issued || "缺") + " → " + (issued || "无法归一") + "）。"
+        + "不要读页面 HTML 的 RDFa content 属性：实测 ebook 1513 的 property=\"dcterms:issued\" content 是最后更新日、"
+        + "property=\"dcterms:modified\" content 才是发行日，两者交叉错位；页面可见文本 itemprop=\"datePublished\" 才对",
+      "creator 的 pgterms:name 是倒装形（「Shakespeare, William」＝姓, 名），aliases 是历史拼写变体；建 agent 时按语种与姓名顺序核对",
+      "这个 ebook 是 Gutenberg 自己的数字版次：可建 Release，publisher 记 Project Gutenberg，但原作的 Work 层身份要另找一手来源",
+      record.rights ? "dcterms:rights 原文「" + record.rights + "」" : "本次 RDF 没有 dcterms:rights",
+      "subjects/bookshelves 是 LCSH 主题与书架分类，只作 tag 候选，不是站内受控词表",
+      rdfCovers.length ? "封面候选仅取本次 RDF hasFormat 明示的图片 URL；图片正文、内容与版次归属仍需核对" : "本次 RDF hasFormat 未声明封面图片；不按 ebook 编号拼图",
+    ].filter(Boolean).join("；"),
+    rights_note: "Gutenberg 的 rights 实测是「Public domain in the USA.」——只覆盖美国公版，不能据此断言全球公版或该版本可自由分发；封面缩略图由 Gutenberg 生成，写 pictures[] 前确认它确实是这个版次的图。",
+    raw: record,
+  });
+}
+
+/** 解析 /ebooks/search/ 的 HTML：li.booklink 里 href + span.title + span.subtitle（作者）+ span.extra（下载量）。 */
+export function parseGutenbergSearchHtml(html) {
+  const out = [];
+  const source = String(html == null ? "" : html).split(/<li class="booklink">/i).slice(1);
+  for (const block of source) {
+    const href = (block.match(/href="\/ebooks\/(\d{1,7})"/) || [])[1];
+    if (!href) continue;
+    const id = String(Number(href));
+    const thumb = (block.match(/<img class="cover-thumb" src="([^"]+)"/) || [])[1];
+    out.push({
+      id: id,
+      title: xmlText((block.match(/<span class="title">([\s\S]*?)<\/span>/) || [])[1]),
+      author: xmlText((block.match(/<span class="subtitle">([\s\S]*?)<\/span>/) || [])[1]),
+      extra: xmlText((block.match(/<span class="extra">([\s\S]*?)<\/span>/) || [])[1]),
+      cover_thumb: thumb ? GUTENBERG_BASE + String(thumb).replace(/^\/+/, "/") : null,
+      url: gutenbergPageUrl(id),
+    });
+  }
+  return out;
+}
+
+/** Gutenberg 检索。结果是候选：同名异书与不同译本混在一起，必须逐条开 RDF 核对署名。 */
+export async function searchGutenberg(query, opts) {
+  const o = opts || {};
+  const raw = String(query == null ? "" : query).trim();
+  if (!raw) throw new ProviderError("bad_input", "gutenberg", "检索词不能为空");
+  const url = GUTENBERG_BASE + "/ebooks/search/?" + new URLSearchParams({ query: raw }).toString();
+  const res = await httpRequest(url, Object.assign({ provider: "gutenberg", accept: "text/html" }, o));
+  if (res.notFound) {
+    throw new ProviderError("unavailable", "gutenberg", "检索端点返回 HTTP " + res.status + "，不能据此判定无匹配书目",
+      { status: res.status, url: url, retryable: true });
+  }
+  const hits = parseGutenbergSearchHtml(res.text);
+  const total = (res.text.match(/<meta\s+name="totalResults"\s+content="(\d+)"/i) || [])[1];
+  if (total === undefined || (Number(total) > 0 && !hits.length) || hits.some(hit => !hit.title)) {
+    throw new ProviderError("parse", "gutenberg", "检索页缺少可识别的结果计数或书目结构", { retryable: false });
+  }
+  return readResult(res, "gutenberg", {
+    found: hits.length > 0,
+    id: hits[0] ? hits[0].id : null,
+    title: hits[0] ? hits[0].title : null,
+    url: hits[0] ? hits[0].url : url,
+    hits: hits,
+    notes: hits.length
+      ? "候选 " + hits.length + " 条（按 Gutenberg 的排序，通常是下载量）。"
+        + "结果里混着同名异书、不同译本与不同编者的版本，subtitle 是署名线索但不足为凭："
+        + "必须逐条用 gutenberg.ebook 取 RDF 核对 creator 与 issued 后再用"
+      : "Gutenberg 检索无命中：换检索词（试原文题名或作者姓），无命中不代表该书不存在",
+    rights_note: "检索页只给缩略图，不含授权信息。",
+    raw: { query: raw, url: url, hits: hits },
   });
 }
 
@@ -2456,6 +3855,19 @@ export const PROVIDER_OPS = {
   "itunes.album": { provider: "itunes", label: "iTunes Store 专辑 + 曲目（数字 collectionId 或专辑链接）", run: (arg, o) => lookupItunesAlbum(arg, o) },
   "steam.app": { provider: "steam", label: "Steam 应用资料（AppID 或商店/steamdb 链接；可带 langs=/cc=）", run: (arg, o) => fetchSteamApp(arg, o) },
   "steam.search": { provider: "steam", label: "Steam 商店检索（可带 lang=/cc=）", run: (arg, o) => searchSteam(arg, o) },
+  "caa.release": { provider: "coverartarchive", label: "Cover Art Archive 发行版封面图组（release MBID 或链接）", run: (arg, o) => fetchCoverArtArchive(arg, Object.assign({ kind: "release" }, o)) },
+  "caa.release-group": { provider: "coverartarchive", label: "Cover Art Archive 发行组封面图组（release-group MBID 或链接；图属选定发行版）", run: (arg, o) => fetchCoverArtArchive(arg, Object.assign({ kind: "release-group" }, o)) },
+  "kitsu.anime": { provider: "kitsu", label: "Kitsu 动画条目（数字 id / slug / kitsu.io/anime/… 链接）", run: (arg, o) => fetchKitsuMedia(arg, Object.assign({ kind: "anime" }, o)) },
+  "kitsu.manga": { provider: "kitsu", label: "Kitsu 漫画条目（数字 id / slug / kitsu.io/manga/… 链接）", run: (arg, o) => fetchKitsuMedia(arg, Object.assign({ kind: "manga" }, o)) },
+  "kitsu.search": { provider: "kitsu", label: "Kitsu 检索（默认 anime；kind=manga 换层级）", run: (arg, o) => searchKitsu(arg, o) },
+  "vndb.vn": { provider: "vndb", label: "VNDB 作品条目（v<数字> / 裸数字 / vndb.org/v<数字> 链接）", run: (arg, o) => fetchVndbVn(arg, o) },
+  "vndb.releases": { provider: "vndb", label: "VNDB 某作品下的版次（品番 / 条码 / 载体枚数 / 发行方与开发方分工）", run: (arg, o) => fetchVndbReleases(arg, o) },
+  "vndb.character": { provider: "vndb", label: "VNDB 角色条目（c<数字>）", run: (arg, o) => fetchVndbCharacter(arg, o) },
+  "vndb.staff": { provider: "vndb", label: "VNDB 职员条目（s<数字>）", run: (arg, o) => fetchVndbStaff(arg, o) },
+  "vndb.schema": { provider: "vndb", label: "VNDB API 权威字段名与枚举（fields/filters 报错时查这个，不用试错）", run: (arg, o) => fetchVndbSchema(arg, o) },
+  "openbd.isbn": { provider: "openbd", label: "OpenBD 日本出版物书目（ISBN-13 / ISBN-10）", run: (arg, o) => lookupOpenbdByIsbn(arg, o) },
+  "gutenberg.ebook": { provider: "gutenberg", label: "Project Gutenberg 电子书书目（数字 id 或 /ebooks/<id> 链接，读 RDF）", run: (arg, o) => fetchGutenbergEbook(arg, o) },
+  "gutenberg.search": { provider: "gutenberg", label: "Project Gutenberg 检索（候选须逐条核对署名）", run: (arg, o) => searchGutenberg(arg, o) },
 };
 
 /** CLI / smoke 统一分发：未知 op 抛 bad_input，不静默返回空。 */

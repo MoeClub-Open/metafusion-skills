@@ -6,8 +6,9 @@ import path from "node:path";
 import { AUTHORITATIVE_OPS, runAuthoritativeOp } from "./mf-fetch-authoritative.mjs";
 import { PROVIDER_MATRIX, PROVIDER_OPS, runProviderOp } from "./mf-fetch-providers.mjs";
 import { PUBLISHERS, runPublisherOp } from "./mf-fetch-publishers.mjs";
+import { sourceQualification } from "./mf-source-qualification.mjs";
 
-const PROVIDER_SOURCE_IDS = { internetarchive: "archive", myanimelist: "mal" };
+const PROVIDER_SOURCE_IDS = { internetarchive: "archive", myanimelist: "mal", coverartarchive: "caa" };
 const SOURCE_ALIASES = {
   "open-library": "openlibrary", open_library: "openlibrary",
   internetarchive: "archive", internet_archive: "archive",
@@ -19,6 +20,10 @@ const SOURCE_ALIASES = {
   bushiroad: "bushiroad_music", "bushiroad-music": "bushiroad_music",
   bangdream: "bang_dream", "bang-dream": "bang_dream",
   itunes_store: "itunes", "itunes-store": "itunes",
+  coverartarchive: "caa", cover_art_archive: "caa", "cover-art-archive": "caa",
+  coverart: "caa", cover_art: "caa",
+  project_gutenberg: "gutenberg", "project-gutenberg": "gutenberg", pg: "gutenberg",
+  "vn-db": "vndb", vn_db: "vndb",
 };
 
 const PUBLISHER_LABELS = {
@@ -98,6 +103,71 @@ const OPERATION_INPUTS = {
   "musicbrainz.release": { argument: "MusicBrainz release MBID：标准 36 位 UUID。", example: "mf-source run musicbrainz.release 12345678-1234-1234-1234-123456789abc" },
   "musicbrainz.release-group": { argument: "MusicBrainz release-group MBID：标准 36 位 UUID。", example: "mf-source run musicbrainz.release-group 12345678-1234-1234-1234-123456789abc" },
   "musicbrainz.recording": { argument: "MusicBrainz recording MBID：标准 36 位 UUID。", example: "mf-source run musicbrainz.recording 12345678-1234-1234-1234-123456789abc" },
+  "caa.release": {
+    argument: "MusicBrainz release MBID（标准 36 位 UUID），或含 /release/<mbid> 的 coverartarchive.org / musicbrainz.org 链接。",
+    example: "mf-source run caa.release 6474e946-3fdd-4fcf-a902-25d8f203900a",
+    note: "release 与 release-group 的 MBID 不可互换，层级写错会被拒绝而不是静默返回。没有封面时 CAA 返回 HTTP 404 + HTML「No cover art found」，按 found:false 判读——这只说明 CAA 没收录，不代表该版次没有封面。图片正文与 index.json 都托管在 archive.org 上；本机 2026-10-11 实测 archive.org 出现异常 DNS 解析（疑似 DNS 污染）（解析到 Meta 的 face:b00c 段）而不可达，取不到属网络问题，连接器归为 network/unavailable，不会谎报 found:false。选图判据是 types 与 front/back：Case Front 是正面再摄＝与 Front 重复，Back / Case Back 才是另一面。",
+  },
+  "caa.release-group": {
+    argument: "MusicBrainz release-group MBID（标准 36 位 UUID），或含 /release-group/<mbid> 的链接。",
+    example: "mf-source run caa.release-group 3f4c699a-953d-3e44-89d7-f95f9dd2c1ac",
+    note: "release-group 请求会被 CAA 307 到它**选定的那一个发行版**的 index，所以图属于结果里 release_of_record 指向的 Release，不是整组通用。写 Release 封面必须按 release_of_record 归位，不得沿用上级实体——这正是 2026-09-25 封面复审要整改的形态。",
+  },
+  "kitsu.anime": {
+    argument: "数字 id、slug，或 kitsu.io/anime/<id|slug> 链接。",
+    example: "mf-source run kitsu.anime 46474",
+    note: "不存在的 id 是 HTTP 404 + JSON:API errors.code=404，按 found:false 判读；404 但错误体不是这个形状时按不可用处理。titles 已按 BCP-47 归一（ja_jp→ja-JP、zh_cn→zh-CN），en_jp 是罗马音、单列在 romaji，不要当译名写。poster 各档带 width/height/short_edge，据此判封面尺寸门槛；coverImage 是宽幅横幅不是海报。synopsis 末尾的「(Source: Wikipedia)」是简介的真实出处，Kitsu 本身是聚合站不能当权威来源。relationships 只给链接，需要 cast/staff 时另取。",
+  },
+  "kitsu.manga": {
+    argument: "数字 id、slug，或 kitsu.io/manga/<id|slug> 链接。",
+    example: "mf-source run kitsu.manga 46474",
+    note: "与 kitsu.anime 同形状；manga 层级另有 chapter_count / volume_count。层级与链接不符会被拒绝。",
+  },
+  "kitsu.search": {
+    argument: "非空检索词；默认查 anime，opts.kind=manga 换层级。",
+    example: "mf-source run kitsu.search frieren",
+    note: "meta.count=0 或空 data 是明确的无命中；无命中不代表作品不存在。检索词含空格时按 shell 规则整体引号包住（`run kitsu.search \"sousou no frieren\"`）。检索结果只含索引字段，写入前用 kitsu.anime/kitsu.manga 取全字段并核对身份锚点。",
+  },
+  "vndb.vn": {
+    argument: "v<数字>、裸数字，或 vndb.org/v<数字> 链接（v 后最多 8 位）。",
+    example: "mf-source run vndb.vn v17",
+    note: "released 用 00 表示未知的月/日（2003-05-00＝2003 年 5 月、2003-00-00＝2003 年），连接器按此降级到能确证的精度，不当非法日期。description 是 BBCode 且常带 [url=…Wikipedia[/url]] 出处标注——description_text 是机械去标签的纯文本，原文保留在 raw。image.sexual / violence 是社区投票数、不是分级结论。版次字段要用 vndb.releases 另取。",
+  },
+  "vndb.releases": {
+    argument: "VN 的 id：v<数字>、裸数字或 vndb.org/v<数字> 链接（注意是作品层，不是 r<数字>）。",
+    example: "mf-source run vndb.releases v17",
+    note: "这里是 VNDB 最值钱的部分：gtin（条码，附 scheme 与 checksum_valid 提示）、catalog（品番）、media（载体与枚数，可对应站内 Medium 层）、producers 的 publisher/developer 分工、minage（年龄分级）。producers 里 publisher=true 才是发行方；建 agent 与署名关系前按来源策略核对权利链。minage 是数字、不等于站内 content_rating 词表，映射前查 definitions。official/patch 会影响它算不算独立版次。",
+  },
+  "vndb.character": {
+    argument: "c<数字>、裸数字，或 vndb.org/c<数字> 链接。",
+    example: "mf-source run vndb.character c17",
+    note: "name 多为拉丁转写、original 是原文，写站内 agent 时按语种键归位，别把转写当原文。appears_in 的 spoiler 是剧透等级，公开简介不要引用高剧透条目。",
+  },
+  "vndb.staff": {
+    argument: "s<数字>、裸数字，或 vndb.org/s<数字> 链接。",
+    example: "mf-source run vndb.staff s17",
+    note: "aliases 里 ismain=true 的才是主名。VNDB 的 staff **没有** birthday 字段（schema 核过），别把别处看到的生日当成 VNDB 佐证。",
+  },
+  "vndb.schema": {
+    argument: "任意非空占位（如 -）；本操作不读取参数内容。",
+    example: "mf-source run vndb.schema -",
+    note: "返回 VNDB API v2 的权威字段名与枚举。fields 报错（HTTP 400「Invalid 'fields' member」）时查这个，不要试错：嵌套对象必须显式给子字段（titles.lang,titles.title / media.medium,media.qty / languages.lang）。分页参数是 results 不是 count；端点是 POST /kana/<type> 而不是 POST /kana（后者返回纯文本 404「Not found.」，容易误判成端点失效）。",
+  },
+  "openbd.isbn": {
+    argument: "ISBN-13（978/979 开头共 13 位）或 ISBN-10（9 位数字 + 校验位，末位可为 X）；可带空格或连字符。",
+    example: "mf-source run openbd.isbn 9784048923514",
+    note: "查无是 HTTP 200 + [null]，按 found:false 判读。OpenBD 只收日本出版物：台版、繁中版、简体引进版返回 [null] 是收录范围问题，不是站点故障，更不能据此判定该书不存在（繁中版走台灣角川官方商店）。summary.title 可能缺副题或标点，题名以版元商品页 h1 为准，OpenBD 只用来复核巻号·丛书·刊行年月。author 是 ONIX 倒装形（「師走,トオル」＝姓,名）。isbn_checksum.valid=false 只提示校验位不合、不拒绝查询。切勿调用同域名的 /v1/coverage：它忽略 isbn 参数、返回全量清单（实测 59MB）。",
+  },
+  "gutenberg.ebook": {
+    argument: "纯数字 ebook id，或 gutenberg.org/ebooks/<id>（含 .html.images 等变体）链接。",
+    example: "mf-source run gutenberg.ebook 1513",
+    note: "读的是 /cache/epub/<id>/pg<id>.rdf 而不是页面 HTML：实测 ebook 1513 的 HTML 里 RDFa content 属性交叉错位（property=\"dcterms:issued\" content 是最后更新日、property=\"dcterms:modified\" content 才是发行日），只有 RDF 的 dcterms:issued 可靠。creator 的 pgterms:name 是倒装形（「Shakespeare, William」）。dcterms:rights 实测为「Public domain in the USA.」——只覆盖美国公版，不能据此断言全球公版。这个 ebook 是 Gutenberg 自己的数字版次，可建 Release，但原作 Work 层身份要另找一手来源。",
+  },
+  "gutenberg.search": {
+    argument: "非空检索词（试原文题名或作者姓效果更好）。",
+    example: "mf-source run gutenberg.search Shakespeare",
+    note: "返回按 Gutenberg 排序（通常下载量）的候选，含 id / title / author(subtitle) / extra(下载量) / cover_thumb。多词检索用引号整体包住（`run gutenberg.search \"shakespeare romeo\"`）。结果里混着同名异书、不同译本与不同编者版本，subtitle 只是署名线索、不足为凭：必须逐条用 gutenberg.ebook 取 RDF 核对 creator 与 issued 后再用。",
+  },
   "umj.product": { argument: "artist-slug/product-code；slug 为 ASCII 字母/数字/连字符，品番为字母数字段（可用连字符分段），不接受 URL。", example: "mf-source run umj.product demo-artist/abcd-1234" },
   "publisher.pony_canyon": { argument: "2–6 位字母前缀 + 可选连字符 + 1–13 位数字；或 Pony Canyon HTTPS 官方 /music/{站内码}、/visual/{站内码} URL。", example: "mf-source run publisher.pony_canyon PCCG-12345" },
   "publisher.canime": { argument: "品番（2–6 位字母前缀及数字，可含连字符），或 HTTPS canime.jp/product/{站内码} 官方 URL；裸站内码为前缀加 9–10 位数字。", example: "mf-source run publisher.canime PCCG-2541" },
@@ -170,6 +240,7 @@ function makeRegistry() {
         id,
         label: metadata.label ?? id,
         authority: metadata.authority ?? "unspecified",
+        source_qualification: metadata.source_qualification ?? sourceQualification(id),
         access_requirement: metadata.access_requirement ?? { type: "not_stated" },
         endpoints: metadata.endpoints ?? null,
         rate_limit: metadata.rate_limit ?? null,
@@ -188,6 +259,7 @@ function makeRegistry() {
     const source = ensureSource(sourceId, {
       label: providerInfo?.label ?? entry.provider,
       authority: providerInfo?.authority ?? "unspecified",
+      source_qualification: providerInfo?.source_qualification,
       access_requirement: accessRequirement(providerInfo, id),
       endpoints: providerInfo?.baseUrl ?? null,
       rate_limit: providerInfo?.rateLimit ?? null,
@@ -198,6 +270,7 @@ function makeRegistry() {
       source: sourceId,
       label: PROVIDER_OPERATION_LABELS[id] ?? entry.label,
       backend: "provider",
+      source_qualification: source.source_qualification,
       argument: inputHelp?.argument ?? "参数格式尚未登记",
       example: inputHelp?.example?.replace(/^mf-source/, MF_SOURCE_COMMAND),
       ...(inputHelp?.note ? { input_note: inputHelp.note } : {}),
@@ -213,6 +286,7 @@ function makeRegistry() {
     const source = ensureSource(entry.source, {
       label: entry.source === "umj" ? "Universal Music Japan" : entry.source === "musicbrainz" ? "MusicBrainz" : entry.source === "wikidata" ? "Wikidata" : "Bangumi",
       authority: entry.authority,
+      source_qualification: entry.source_qualification,
       access_requirement: { type: entry.access },
       endpoints: null,
       rate_limit: entry.source === "musicbrainz" ? "每秒不超过 1 次请求" : null,
@@ -224,6 +298,7 @@ function makeRegistry() {
       source: entry.source,
       label: entry.label,
       backend: "authoritative",
+      source_qualification: source.source_qualification,
       argument: inputHelp?.argument ?? "参数格式尚未登记",
       example: inputHelp?.example?.replace(/^mf-source/, MF_SOURCE_COMMAND),
       ...(inputHelp?.note ? { input_note: inputHelp.note } : {}),
@@ -241,6 +316,7 @@ function makeRegistry() {
     const source = ensureSource(sourceId, {
       label,
       authority: "版权方官方来源",
+      source_qualification: sourceQualification("publisher"),
       access_requirement: { type: "anonymous" },
       limitations: ["仅使用注册连接器允许的官方域名和输入形状。", "返回字段取决于页面可见内容；缺失字段以连接器结果为准。"],
     });
@@ -250,6 +326,7 @@ function makeRegistry() {
       source: sourceId,
       label,
       backend: "publisher",
+      source_qualification: source.source_qualification,
       argument: inputHelp?.argument ?? "参数格式尚未登记",
       example: inputHelp?.example?.replace(/^mf-source/, MF_SOURCE_COMMAND),
       ...(inputHelp?.note ? { input_note: inputHelp.note } : {}),
@@ -356,6 +433,7 @@ function resultEnvelope(operation, rawData) {
       id: source.id,
       label: source.label,
       authority: source.authority,
+      source_qualification: source.source_qualification,
       access_requirement: source.access_requirement,
       connection_status: "not_probed_by_list; this response completed",
     },
@@ -397,12 +475,26 @@ function errorKind(err) {
   return known.has(err?.kind) ? err.kind : "unexpected";
 }
 
+/**
+ * 透传 hint 前先脱敏。hint 是连接器自己写的"下一步怎么办"，对 agent 有实际价值
+ * （例如 VNDB fields 报错时提示"嵌套对象必须给子字段，用 vndb.schema 查权威字段名"），
+ * 但它在 mf-fetch-* 里也可能被调用方通过 opts 注入，所以按凭据形态再挡一层：
+ * normalizeOutput 只管 URL 查询串与 Bearer，这里补上 `XXX_TOKEN=value` 这种裸赋值。
+ */
+function scrubSecretText(value) {
+  if (typeof value !== "string") return null;
+  const scrubbed = String(normalizeOutput(value, "hint"))
+    .replace(/\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|CLIENT_?ID|CREDENTIAL)[A-Za-z0-9_]*\s*[=:]\s*\S+/gi, "[REDACTED]");
+  return scrubbed.trim() || null;
+}
+
 function errorEnvelope(err, requestedOp = null) {
   const registry = makeRegistry();
   const kind = errorKind(err);
   const op = requestedOp ? registry.operations.get(requestedOp) : null;
   const knownSource = op?.source ?? (registry.sources.has(err?.source) ? err.source : null);
   const status = Number.isInteger(err?.status) ? err.status : null;
+  const hint = scrubSecretText(err?.hint);
   return {
     response_status: "error",
     error: {
@@ -412,6 +504,8 @@ function errorEnvelope(err, requestedOp = null) {
       status,
       retryable: Boolean(err?.retryable),
       message: err instanceof SourceCommandError ? err.message : SAFE_ERROR_MESSAGES[kind],
+      // 只在确有可执行提示时出现，避免每份错误信封都多一个 null 键。
+      ...(hint ? { hint } : {}),
     },
   };
 }

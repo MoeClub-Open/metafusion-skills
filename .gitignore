@@ -8,3 +8,14 @@ __pycache__/
 *.pyo
 
 /skills/metafusion-curator/workspaces/
+
+# Agent 的执行草稿、查询结果与临时工作副本不得进入版本库。
+/.tmp*/
+/.tmp*
+/tmp-*
+/test.txt
+/otome_id.json
+/workspaces/
+/skills/workspaces/
+/skills/metafusion-curator/tmp/
+/skills/metafusion-curator/tools/

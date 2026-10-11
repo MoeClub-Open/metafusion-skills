@@ -1,0 +1,62 @@
+{
+  "release": "https://musicbrainz.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "images": [
+    {
+      "approved": true,
+      "back": false,
+      "comment": "",
+      "edit": 76543210,
+      "front": true,
+      "id": 3918271645,
+      "image": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271645.jpg",
+      "thumbnails": {
+        "250": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271645-250.jpg",
+        "500": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271645-500.jpg",
+        "1200": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271645-1200.jpg",
+        "large": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271645-500.jpg",
+        "small": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271645-250.jpg"
+      },
+      "types": [
+        "Front"
+      ]
+    },
+    {
+      "approved": true,
+      "back": true,
+      "comment": "tray card",
+      "edit": 76543211,
+      "front": false,
+      "id": 3918271646,
+      "image": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271646.jpg",
+      "thumbnails": {
+        "250": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271646-250.jpg",
+        "500": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271646-500.jpg",
+        "1200": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271646-1200.jpg",
+        "large": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271646-500.jpg",
+        "small": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271646-250.jpg"
+      },
+      "types": [
+        "Back"
+      ]
+    },
+    {
+      "approved": false,
+      "back": false,
+      "comment": "re-shoot of the front cover through the jewel case",
+      "edit": 76543212,
+      "front": true,
+      "id": 3918271647,
+      "image": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271647.jpg",
+      "thumbnails": {
+        "250": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271647-250.jpg",
+        "500": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271647-500.jpg",
+        "1200": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271647-1200.jpg",
+        "large": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271647-500.jpg",
+        "small": "http://coverartarchive.org/release/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/3918271647-250.jpg"
+      },
+      "types": [
+        "Case Front"
+      ]
+    }
+  ]
+}

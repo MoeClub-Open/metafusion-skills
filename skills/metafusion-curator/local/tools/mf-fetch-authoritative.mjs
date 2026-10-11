@@ -3,6 +3,7 @@
 
 import { jsonRequest, ProviderError } from "./mf-fetch-providers.mjs";
 import { extractMeta, fetchHtml, PublisherError } from "./mf-fetch-publishers.mjs";
+import { sourceQualification } from "./mf-source-qualification.mjs";
 
 const TAGS_WHITELIST = new Set([
   "manga", "television_anime", "tv_anime", "anime", "game", "video_game",
@@ -575,8 +576,8 @@ export async function fetchUniversalMusicJapanProduct(artistSlug, productCode, o
 }
 
 export const AUTHORITATIVE_OPS = {
-  "wikidata.search": { source: "wikidata", label: "Wikidata 实体检索", authority: "官方知识库；声明值须核对", access: "anonymous", run: (arg, opts) => searchWikidata(arg, "ja", opts) },
-  "wikidata.entity": { source: "wikidata", label: "Wikidata 实体详情", authority: "官方知识库；声明值须核对", access: "anonymous", run: (arg, opts) => fetchWikidataEntity(arg, opts) },
+  "wikidata.search": { source: "wikidata", label: "Wikidata 实体检索", authority: "社区知识库；声明引用的原始来源须核对", access: "anonymous", run: (arg, opts) => searchWikidata(arg, "ja", opts) },
+  "wikidata.entity": { source: "wikidata", label: "Wikidata 实体详情", authority: "社区知识库；声明引用的原始来源须核对", access: "anonymous", run: (arg, opts) => fetchWikidataEntity(arg, opts) },
   "bangumi.subject": { source: "bangumi", label: "Bangumi subject 详情", authority: "社区编目来源", access: "anonymous", run: (arg, opts) => fetchBangumiSubject(arg, opts) },
   "bangumi.search": { source: "bangumi", label: "Bangumi subject 搜索（实验性 POST）", authority: "社区编目来源", access: "anonymous", run: (arg, opts) => searchBangumiSubjects(arg, opts) },
   "musicbrainz.artist.search": { source: "musicbrainz", label: "MusicBrainz 艺人搜索", authority: "社区编目来源", access: "anonymous", run: (arg, opts) => searchMusicBrainzArtist(arg, opts) },
@@ -592,6 +593,10 @@ export const AUTHORITATIVE_OPS = {
     return fetchUniversalMusicJapanProduct(parts[0], parts[1], opts);
   } },
 };
+
+for (const entry of Object.values(AUTHORITATIVE_OPS)) {
+  entry.source_qualification = sourceQualification(entry.source);
+}
 
 const LEGACY_OPS = {
   wd_search: "wikidata.search",

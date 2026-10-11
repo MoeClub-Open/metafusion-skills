@@ -62,10 +62,33 @@ test("no args, --help, and -h all show the same free help", async () => {
   assert.deepEqual(noArgs, shortFlag);
 });
 
+test("source qualification is machine-readable, scoped by field, and does not reject community results", async () => {
+  const sources = Object.fromEntries(listSources().map(source => [source.id, source]));
+  for (const source of Object.values(sources)) {
+    assert.match(source.source_qualification.level, /^(CORE-P1|AUX-P2)$/);
+    assert.equal(typeof source.source_qualification.can_independently_support_core_identity, "boolean");
+    assert.ok(source.source_qualification.scope);
+    assert.ok(Array.isArray(source.source_qualification.field_limits));
+  }
+  assert.equal(sources.musicbrainz.source_qualification.level, "AUX-P2");
+  assert.equal(sources.wikidata.source_qualification.can_independently_support_core_identity, false);
+  assert.equal(sources.openbd.source_qualification.level, "AUX-P2");
+  assert.equal(sources.gutenberg.source_qualification.level, "CORE-P1");
+  assert.match(sources.gutenberg.source_qualification.scope, /自己发行的数字版次/);
+  assert.ok(sources.gutenberg.source_qualification.field_limits.some(limit => /原作 Work/.test(limit)));
+  assert.ok(listSourceOperations().every(operation => operation.source_qualification?.scope));
+  const result = await dispatchSourceOperation("bangumi.subject", "1", {
+    runAuthoritativeOpImpl: async () => ({ id: 1, name: "Community record" }),
+  });
+  assert.equal(result.response_status, "ok");
+  assert.equal(result.source.source_qualification.level, "AUX-P2");
+  assert.equal(result.source.source_qualification.can_independently_support_core_identity, false);
+});
+
 test("all registered operations and source help expose a concrete format and copyable example", async () => {
   const operations = listSourceOperations();
   const help = await executeMfSource(["help"]);
-  assert.equal(operations.length, 46);
+  assert.equal(operations.length, 59);
   assert.deepEqual(help.operations.map(operation => operation.id), operations.map(operation => operation.id));
 
   for (const operation of operations) {
@@ -83,6 +106,55 @@ test("all registered operations and source help expose a concrete format and cop
     const sourceHelp = await executeMfSource(["help", source.id]);
     assert.deepEqual(sourceHelp.operations.map(operation => operation.id), source.operation_ids);
     assert.ok(sourceHelp.operations.every(operation => operation.argument && operation.example));
+  }
+});
+
+// 2026-10-11 新增的五个缺口源。这条测试专门盯它们：上面那条总数棘轮只能发现"数量变了"，
+// 发现不了"caa 被从 PROVIDER_SOURCE_IDS 里删掉、于是以 coverartarchive 为名重新长出来"这种错位。
+test("the five gap-fill sources register with anonymous access and concrete operation help", async () => {
+  const sources = Object.fromEntries(listSources().map((source) => [source.id, source]));
+  const expected = {
+    caa: { authority: "official-community", operations: ["caa.release", "caa.release-group"] },
+    kitsu: { authority: "official-community", operations: ["kitsu.anime", "kitsu.manga", "kitsu.search"] },
+    vndb: { authority: "official-community", operations: ["vndb.character", "vndb.releases", "vndb.schema", "vndb.staff", "vndb.vn"] },
+    openbd: { authority: "bibliographic-aggregator", operations: ["openbd.isbn"] },
+    gutenberg: { authority: "own-digital-edition-publisher", operations: ["gutenberg.ebook", "gutenberg.search"] },
+  };
+  for (const [id, want] of Object.entries(expected)) {
+    const source = sources[id];
+    assert.ok(source, `source ${id} missing from the registry`);
+    assert.equal(source.authority, want.authority, `${id} authority`);
+    assert.equal(source.access_requirement.type, "anonymous", `${id} must not require credentials`);
+    assert.ok(source.rate_limit && source.rate_limit.length > 0, `${id} must advertise a rate limit`);
+    assert.deepEqual([...source.operation_ids].sort(), [...want.operations].sort(), `${id} operations`);
+    assert.ok(source.endpoints && /^https:\/\//.test(source.endpoints), `${id} endpoints must be an https base url`);
+  }
+
+  const operations = Object.fromEntries(listSourceOperations().map((operation) => [operation.id, operation]));
+  for (const id of Object.values(expected).flatMap((entry) => entry.operations)) {
+    const operation = operations[id];
+    assert.ok(operation, `operation ${id} missing`);
+    assert.equal(operation.backend, "provider");
+    assert.equal(operation.status, "registered");
+    assert.ok(operation.argument.length >= 12, `${id} needs a concrete argument format`);
+    assert.ok(operation.input_note && operation.input_note.length >= 20, `${id} needs an input note carrying the verified traps`);
+    // node mf-source.mjs run <op> <单个参数> ＝ 5 段，多一段就说明示例里塞了带空格的参数。
+    assert.equal(operation.example.split(/\s+/).length, 5, `${id} example must stay a single-argument copyable command`);
+  }
+
+  // 每个源的 input_note 必须带着本机实测出来的那个坑，否则下一个人会重踩。
+  assert.match(operations["caa.release-group"].input_note, /release_of_record/);
+  assert.match(operations["caa.release"].input_note, /archive\.org/);
+  assert.match(operations["kitsu.anime"].input_note, /Source: Wikipedia|romaji|short_edge/);
+  assert.match(operations["vndb.schema"].input_note, /results 不是 count/);
+  assert.match(operations["vndb.staff"].input_note, /birthday/);
+  assert.match(operations["openbd.isbn"].input_note, /59MB|coverage/);
+  assert.match(operations["gutenberg.ebook"].input_note, /交叉错位/);
+
+  // 源别名要能把常见写法收敛到规范 id（coverartarchive → caa 靠 PROVIDER_SOURCE_IDS）。
+  for (const [alias, canonical] of [["coverartarchive", "caa"], ["cover-art-archive", "caa"], ["project-gutenberg", "gutenberg"], ["pg", "gutenberg"]]) {
+    const sourceHelp = await executeMfSource(["help", alias]);
+    assert.equal(sourceHelp.source.id, canonical, `alias ${alias} must resolve to ${canonical}`);
   }
 });
 
@@ -158,6 +230,7 @@ test("representative provider and publisher help examples pass real parsers with
       url,
       headers: { get: name => String(name).toLowerCase() === "content-type" ? (isni ? "application/rdf+xml" : "application/json") : null },
       text: async () => body,
+      arrayBuffer: async () => new TextEncoder().encode(body).buffer,
     };
   };
 
