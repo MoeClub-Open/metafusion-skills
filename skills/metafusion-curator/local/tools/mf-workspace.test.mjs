@@ -148,6 +148,21 @@ test("rebase merges disjoint fields and requires explicit overlap resolution", (
   ]);
   assert.equal({}.polluted, undefined);
 });
+test("commit auto-fills source key and source_refs so server-required evidence mapping is present", async (t) => {
+  const f = fixture(t),
+    local = await f.seal();
+  const sealed = f.read(`.mf/commits/${local.commit_id}.json`).request;
+  assert.equal(sealed.sources.length, 1);
+  assert.equal(sealed.sources[0].key, "s1");
+  assert.ok(sealed.operations.every((op) => Array.isArray(op.source_refs) && op.source_refs.length === 1 && op.source_refs[0].source === "s1"));
+  // Push body must carry the same mapping (server rejects missing source_refs).
+  await runWorkspace("push", { ...f.opts, apply: true });
+  const push = f.calls.find((c) => c.p.endsWith("/commits") && c.o?.method !== undefined ? true : c.p.endsWith("/commits"));
+  assert.ok(push);
+  const body = push.o.body;
+  assert.equal(body.sources[0].key, "s1");
+  assert.equal(body.operations[0].source_refs[0].source, "s1");
+});
 test("commit is local, push atomic receipt refreshes base, no entity PUT", async (t) => {
   const f = fixture(t),
     local = await f.seal();

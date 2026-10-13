@@ -14,7 +14,7 @@
 ## 提交
 
 1. 按当前候选接口核查新建身份；checkout 获取 base_version 与 definitions_etag。
-2. Agent 构造 operations、sources、edit_note，调用 `metafusion_commit_prepare`。平台只生成 UUID、保存不可变载荷，30 天有效，不提交事实数据。
+2. Agent 构造 operations、sources、edit_note，调用 `metafusion_commit_prepare`。每条 source 必须有唯一 `key`；每个操作必须有非空 `source_refs`（可带 JSON Pointer）。缺省会在 prepare 阶段以 `invalid_source_refs` / 上游 `source_refs_required` 拒绝——无兼容模式。平台只生成 UUID、保存不可变载荷，30 天有效，不提交事实数据。
 3. 用 `metafusion_commit` 的 `preview` 校验同一 ID，再显式 `push`。`get` 可取回封存载荷；`recover` 只查回执。
 4. 未知结果先 recover，不换 ID 或自动重放。确认 `transaction_busy/applied:false` 才按 Retry-After 显式重试原 ID。409 真冲突必须取舍并 rebase，形成新提交。
 
