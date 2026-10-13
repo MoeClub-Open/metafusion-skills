@@ -352,8 +352,12 @@ DTO 不含 `entity` 或 `contents`，服务端在事务内保留完整收录；`
 核对返回的 ID、归属（work / release / medium）、`position`、翻译回退、`pictures` 与 revision 内容是否与预期一致。
 收到 409 `version_conflict` 时先回读再决定是否重放；响应不明时先查状态，不要盲目重试创建或自动删除已成功的数据。
 
-## 迁移与导入
+## 外部来源只读查询
 
-`POST /api/importer/preview` 与 `POST /api/importer/import`（**前缀是 `/api/importer`，不是 `/api/catalog/importer`**）
- 是按来源适配器预览与按证据导入路径；先读 `GET /api/importer/sources` 核实实例可用来源。本地适配器种子目前为 bangumi/dlsite/dmm，外部库 GUI 注册新码不会自动实现抓取适配器；
+写导入路径（`POST /api/importer/*` 与 `catalog.import.submit`）已删除。使用：
+
+- `GET /api/external-sources` — 列出真有适配器的来源（bangumi/dlsite/dmm）
+- `POST /api/external-sources/query` — `op=search|lookup|detail`，返回 raw + FetchMeta（url/fetched_at/content_hash）；lookup/detail 另含既有 preview 映射
+
+落库请走实体 / 关系端点或提交工作流；外部库 GUI 注册新码不会自动实现抓取适配器。
 需要逐项审查、失败可恢复与可追溯修订时，使用上面的实体与关系端点。
