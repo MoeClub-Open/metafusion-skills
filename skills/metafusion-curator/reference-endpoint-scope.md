@@ -6,7 +6,7 @@
 
 | 系统 | 负责什么 | 对外路径前缀 | 实现仓库 |
 | --- | --- | --- | --- |
-| 元数据目录 catalog | 八类实体、动态定义、关系、结构、修订、检索、货架、外部权威库、快照导出与外部提案（`catalog.*`） | `/api/catalog/*`（含 `/api/catalog/me/home-preferences`）、`/api/importer/*`、`/api/exchange/*`、`/api/admin/catalog-definitions`、`/api/admin/shelves`、`/api/admin/external-databases`、`/api/openapi.json` | MetaFusion |
+| 元数据目录 catalog | 八类实体、动态定义、关系、结构、修订、检索、货架、外部权威库、快照导出与外部提案（`catalog.*`） | `/api/catalog/*`（含 `/api/catalog/me/home-preferences`）、`/api/external-sources/*`、`/api/exchange/*`、`/api/admin/catalog-definitions`、`/api/admin/shelves`、`/api/admin/external-databases`、`/api/openapi.json` | MetaFusion |
 | 账号 auth | 用户、会话、OAuth 客户端/授权码/令牌、RSA 密钥（`auth.*`） | `/api/setup`、`/api/auth/*`、`/api/admin/users*`、`/api/oauth/*`、`/api/oidc/jwks`、`/api/.well-known/openid-configuration` | metafusion-auth |
 | 互动 community | 论坛板块/主题/回复/标签、条目短评、收藏、私信（`community.*`） | `/api/community/*`、`/api/favorites/*`、`/api/messages/*`、`/api/users/{id}/favorites`、`/api/users/{id}/stats` | metafusion-community |
 | 存储 storage | 物理文件、sha256 内容寻址、对象存储直传、文件→实体绑定、下载与预览的访问控制（`storage.*`） | `/api/storage/*` | metafusion-storage |
