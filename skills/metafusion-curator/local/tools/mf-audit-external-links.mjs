@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// 外部标识同一性审计（只读）：核验 external_ids.<provider> 是否真的指向"同一个对象"。
+// 外部标识同一性审计（只读）：核验 external_links[].kind 是否真的指向"同一个对象"。
 //
 // 为什么值得单独一趟：**标识指错对象比字段缺失更危险**——它会让系统把别的作品/人物
 // 当成同一对象，而结构校验看不出来。实战中在 54 条 bangumi 外链里查出 3 条错配、
 // 在 193 条 musicbrainz 外链里查出 25 首歌挂了所属专辑的 release-group id 与 1 条死链。
 //
 // 用法：
-//   node mf-audit-external-ids.mjs --provider musicbrainz [--limit N]
-//   node mf-audit-external-ids.mjs --provider bangumi [--limit N]
+//   node mf-audit-external-links.mjs --provider musicbrainz [--limit N]
+//   node mf-audit-external-links.mjs --provider bangumi [--limit N]
 //
 // 产出：docs-local/data-quality/external-id-audit-<provider>.json
 //
@@ -106,7 +106,10 @@ const rows = [];
 for (const kind of KINDS) {
   const items = await listKind(kind);
   for (const it of items) {
-    const v = it.external_ids?.[P.key];
+    const v = (Array.isArray(it.external_links) ? it.external_links : [])
+      .find((link) => link.kind === P.key)?.external_id
+      || (Array.isArray(it.external_links) ? it.external_links : [])
+      .find((link) => link.kind === P.key)?.url;
     if (v) rows.push({ kind, id: it.id, title: it.title, ext: String(v), attributes: it.attributes ?? {} });
   }
   await sleep(80);
@@ -135,7 +138,7 @@ for (const p of problems.slice(0, 60)) {
 }
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const out = `${OUT_DIR}/external-id-audit-${PROVIDER}.json`;
-fs.writeFileSync(out, JSON.stringify({ provider: PROVIDER, scope: "可访问性与题名线索，不能代替核心身份来源核验", identity_verified: false, checked: sample.length, ok, unknown, problems }, null, 2), "utf8");
+fs.writeFileSync(out, JSON.stringify({ kind: PROVIDER, scope: "可访问性与题名线索，不能代替核心身份来源核验", identity_verified: false, checked: sample.length, ok, unknown, problems }, null, 2), "utf8");
 console.log("写入", out);
 
 }

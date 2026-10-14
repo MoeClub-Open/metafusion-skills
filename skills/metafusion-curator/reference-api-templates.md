@@ -102,7 +102,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         "title": "秒速5厘米",
         "original_language": "ja",
         "attributes": {"tags": ["动画", "剧场版"]},
-        "external_ids": {},
+        "external_links": {},
         "pictures": [
           {
             "url": "https://example.org/covers/5cm.jpg",
@@ -123,7 +123,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
     }
 
 - `title` 是基础题名，`original_language` 声明它属于哪个语种；原语言题名放在对应 locale 的 `translations` 行里。
-- `external_ids` 的键必须来自实例预设；作品/发行/主体的官方站点用 `official_website` 记**完整 URL**
+- `external_links` 的键必须来自实例预设；作品/发行/主体的官方站点用 `official_website` 记**完整 URL**
   （前端"外部资料"面板据此渲染官网入口并排在首位），核到官网就不要让它留在空对象里。
 - `pictures[].url` 必须是绝对 HTTP(S) 地址：相对路径（如 `/assets/covers/x.webp`）会被拒绝为 `invalid_picture`。图片须匹配具体实体/发行版；当前任务的图片操作授权与版权/许可材料分开记录。明确的任务操作授权可在其范围内执行，但不等于权利已核实；权利材料未知时报告 `unknown`，不能写成 `passed`。计数条件按本次批次定义。
 - 图片可带 `version_label`（多语言）、`usage_period: {begin?, end?}`（至少一端非空）、`role`（启用的 `picture_role` 词表码）与 `asset_id`（存储资产 UUID）；使用时段不表示版权期限。数组首项是手动封面，`taken_at` 不决定排序。自托管图片先完成 `cover_image` 绑定，再写 `asset_id` 并回读，流程见[文件上传与绑定](reference-file-upload.md)。

@@ -12,7 +12,7 @@ import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { identityPatch, rebasePatch } from "./mf-workspace.mjs";
 import { mergeEntity, unionInto, identityConflicts } from "./mf-lib.mjs";
-import { checkBangumi, checkMusicBrainz } from "./mf-audit-external-ids.mjs";
+import { checkBangumi, checkMusicBrainz } from "./mf-audit-external-links.mjs";
 
 process.env.MF_BASE = "https://example.com";
 process.env.MF_PAT = "test-token-not-a-real-credential";
@@ -35,7 +35,7 @@ const entity = (id, extras = {}) => ({
   status: "published",
   translations: { "en-US": { title: "Same" } },
   attributes: { tags: ["song"] },
-  external_ids: { isrc: "USAAA2600001" },
+  external_links: { isrc: "USAAA2600001" },
   pictures: [],
   ...extras,
 });
@@ -153,7 +153,7 @@ test("预检版本变化时不把旧并集覆盖到新实体", async () => {
 
 test("同名但官方身份锚点冲突、冲突字段都不能合并", async () => {
   for (const lose of [
-    entity("lose", { external_ids: { isrc: "USAAA2600002" } }),
+    entity("lose", { external_links: { isrc: "USAAA2600002" } }),
     entity("lose", { translations: { "en-US": { title: "Other" } } }),
   ]) {
     const keep = entity("keep");
@@ -197,7 +197,7 @@ test("收录并集保留同一表达的不同定位并避免位置冲突", () =>
 
 test("合并身份并集复核完整候选并排除保留方 canonical aliases", async () => {
   const keep = entity(randomUUID()),
-    lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } }),
+    lose = entity(randomUUID(), { external_links: { ...keep.external_links, wikidata: "Q123" } }),
     alias = entity(randomUUID(), { status: "merged" });
   const calls = mergeFixture(keep, lose, { candidateRows: [
     { matched: keep, canonical: keep }, { matched: alias, canonical: keep }, { matched: lose, canonical: lose },
@@ -206,13 +206,13 @@ test("合并身份并集复核完整候选并排除保留方 canonical aliases",
   assert.equal(result.ok, true);
   const query = calls.find((c) => c.path.endsWith("/candidates")).body;
   assert.deepEqual(query.titles, ["Same", "Same"]);
-  assert.ok(query.external_ids.some((p) => p.provider === "wikidata" && p.value === "Q123"));
+  assert.ok(query.external_links.some((p) => p.provider === "wikidata" && p.value === "Q123"));
   assert.deepEqual(calls.find((c) => c.path.endsWith("/commits")).body.operations[0].reviewed_candidate_ids, [lose.id]);
 });
 
 test("合并发现第三 canonical 身份默认在全部写入前停止，显式审查后可继续", async () => {
   const keep = entity(randomUUID()),
-    lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } }),
+    lose = entity(randomUUID(), { external_links: { ...keep.external_links, wikidata: "Q123" } }),
     other = entity(randomUUID()),
     rows = [keep, lose, other].map((e) => ({ matched: e, canonical: e }));
   let calls = mergeFixture(keep, lose, { candidateRows: rows });
@@ -230,7 +230,7 @@ test("合并发现第三 canonical 身份默认在全部写入前停止，显式
 test("合并身份候选按结构归属查询；错 scope、截断、未解析或失败均禁止写入", async () => {
   for (const [kind, scopeField] of [["expression", "work_id"], ["content_unit", "work_id"], ["medium", "release_id"], ["track", "medium_id"]]) {
     const keep = entity(randomUUID(), { kind, [scopeField]: randomUUID() }),
-      lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_ids: { ...keep.external_ids, wikidata: "Q123" } });
+      lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_links: { ...keep.external_links, wikidata: "Q123" } });
     const calls = mergeFixture(keep, lose);
     const dry = await mergeEntity({ kind, keep, lose, sources });
     assert.equal(dry.ok, true);
@@ -239,7 +239,7 @@ test("合并身份候选按结构归属查询；错 scope、截断、未解析�
     assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
   }
   const keep = entity(randomUUID(), { kind: "medium", release_id: randomUUID() }),
-    lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_ids: { ...keep.external_ids, wikidata: "Q123" } });
+    lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_links: { ...keep.external_links, wikidata: "Q123" } });
   for (const options of [
     { candidateRows: [{ matched: { ...lose, release_id: randomUUID() }, canonical: lose }] },
     { candidateRows: [{ matched: lose, canonical: null }] },
@@ -255,7 +255,7 @@ test("合并身份候选按结构归属查询；错 scope、截断、未解析�
 
 test("并发改变候选使合并commit返回409时不删边也不执行lifecycle", async () => {
   const keep = entity(randomUUID()),
-    lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } }),
+    lose = entity(randomUUID(), { external_links: { ...keep.external_links, wikidata: "Q123" } }),
     edge = (id, source_id) => ({ id, source_id, target_id: "agent", type: "credit_for", attributes: {}, version: 1 });
   const calls = mergeFixture(keep, lose, { commitStatus: 409,
     keepRels: [edge("keep-edge", keep.id)], loseRels: [edge("lose-edge", lose.id)] });
@@ -268,7 +268,7 @@ test("并发改变候选使合并commit返回409时不删边也不执行lifecycl
 });
 
 test("合并已审列表不能包含自身、无效ID或本次未命中的第三对象", async () => {
-  const keep = entity(randomUUID()), lose = entity(randomUUID(), { external_ids: { ...keep.external_ids, wikidata: "Q123" } });
+  const keep = entity(randomUUID()), lose = entity(randomUUID(), { external_links: { ...keep.external_links, wikidata: "Q123" } });
   for (const reviewedCandidateIDs of [[keep.id], ["not-a-uuid"], [lose.id, lose.id], null]) {
     const calls = mergeFixture(keep, lose);
     const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs });
@@ -462,7 +462,7 @@ test("审计保留真实断链/覆盖问题和未知项，不把可选篇目引�
         entity("song"),
         entity("album", {
           attributes: { tags: ["album"] },
-          external_ids: { isrc: "USAAA2600002" },
+          external_links: { isrc: "USAAA2600002" },
         }),
       ],
       content_unit: [
@@ -578,7 +578,7 @@ const expr = (id, extras = {}) => ({
   status: "published",
   translations: { "ja-JP": { title: "DRIVE US CRAZY" } },
   attributes: {},
-  external_ids: {},
+  external_links: {},
   pictures: [],
   ...extras,
 });

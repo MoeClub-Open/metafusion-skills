@@ -434,7 +434,7 @@ test("explicit removal seals only the approved path and survives a disjoint reba
 });
 
 test("identity review follows server title, translation ancestor and external ID patch rules", () => {
-  for (const p of ["/title", "/external_ids", "/external_ids/wikidata", "/translations", "/translations/ja", "/translations/ja/title"])
+  for (const p of ["/title", "/external_links", "/external_links/wikidata", "/translations", "/translations/ja", "/translations/ja/title"])
     assert.equal(identityPatch([{ path: p, value: null }]), true, p);
   for (const p of ["/attributes/language", "/translations/ja/summary", "/translations/ja/aliases"])
     assert.equal(identityPatch([{ path: p, value: null }]), false, p);
