@@ -12,7 +12,7 @@ import {
 const API = "/api/catalog";
 const fields = {
   entity: new Set(
-    "title original_language translations attributes external_ids pictures status content_unit_id parent_id position number contents subjects".split(
+    "title original_language translations attributes external_links pictures status content_unit_id parent_id position number contents subjects".split(
       " ",
     ),
   ),
@@ -102,7 +102,7 @@ function omittedPaths(base, working, target, removals = []) {
 export function identityPatch(patch) {
   return patch.some(({ path: p }) => {
     const keys = parts(p);
-    return keys[0] === "title" || keys[0] === "external_ids" ||
+    return keys[0] === "title" || keys[0] === "external_links" ||
       (keys[0] === "translations" && (keys.length <= 2 || keys[2] === "title"));
   });
 }

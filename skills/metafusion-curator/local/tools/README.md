@@ -10,7 +10,7 @@
 | 隐藏 Track 收录的单条编辑 | `mf-track-content` |
 | 词项 upsert / 受控新增字段 | `mf-definitions`；`--public` 只读，不作写入源 |
 | 查重候选/目录快照 | `mf-find-identity`、`mf-catalog-snapshot` |
-| 质检 | `mf-audit`、`mf-check-structure`、`mf-audit-external-ids`、`mf-audit-provenance` |
+| 质检 | `mf-audit`、`mf-check-structure`、`mf-audit-external-links`、`mf-audit-provenance` |
 | 合并已核实重复 | `mf-merge`；先 dry-run，多步非原子，部分完成不盲重跑 |
 
 ```bash

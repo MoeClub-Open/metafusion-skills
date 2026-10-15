@@ -25,9 +25,9 @@
 | 译名/别名 | AUX-P2，官方本地化优先，不单独判身份 |
 | 图片 | 核图源与具体版次，权利另判；系统 id/version/编辑者不作事实证据 |
 
-官方主页写 `external_ids.official_website` 完整 URL，渠道/资讯页不替代。Apple Music/iTunes 官方页可支持对应数字发行；专辑 ID 写 `external_ids.apple_music`，不套用到其他版次。
+官方主页写 `external_links.official_website` 完整 URL，渠道/资讯页不替代。Apple Music/iTunes 官方页可支持对应数字发行；专辑 ID 写 `external_links.apple_music`，不套用到其他版次。
 
-iTunes 封面 URL 的文件名段（如 `4538182209493_cov.jpg`、`4547366532999.jpg`）常携带发行方编号，而连接器 `itunes.album` 的 `release_number` / `external_ids.barcode_candidate` 只做「6–14 位数字 + 可选 GTIN 校验提示」的保守提取，**不自行判定来源资格**：同一张数字发行可能用独立编号、沿用实体版条码或没有编号，文件名取值也不保证等于实体盘 UPC/JAN。因此它只是候选线索，除非与权利方页面或对应版次交叉核实，否则不满足上表「条码/编号」的 CORE-P1 门槛，不得直接写入 `identifiers`/`external_ids`。封面 `images` 多尺寸同样只作图源候选，按「图片」一节核实图源、版次与权利。
+iTunes 封面 URL 的文件名段（如 `4538182209493_cov.jpg`、`4547366532999.jpg`）常携带发行方编号，而连接器 `itunes.album` 的 `release_number` / `external_links.barcode_candidate` 只做「6–14 位数字 + 可选 GTIN 校验提示」的保守提取，**不自行判定来源资格**：同一张数字发行可能用独立编号、沿用实体版条码或没有编号，文件名取值也不保证等于实体盘 UPC/JAN。因此它只是候选线索，除非与权利方页面或对应版次交叉核实，否则不满足上表「条码/编号」的 CORE-P1 门槛，不得直接写入 `identifiers`/`external_links`。封面 `images` 多尺寸同样只作图源候选，按「图片」一节核实图源、版次与权利。
 
 2026-10-11 新增五个连接器（`caa.*`、`kitsu.*`、`vndb.*`、`openbd.isbn`、`gutenberg.*`）的字段级归位，仍按上表逐字段判，不给整站背书：
 

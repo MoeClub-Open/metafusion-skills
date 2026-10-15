@@ -33,7 +33,7 @@ function currentEntity() {
     title: "Example",
     original_language: "en-US",
     attributes: { language: "en" },
-    external_ids: {},
+    external_links: {},
     pictures: [],
     translations: {
       "en-US": { title: "Example", summary: "Official summary" },

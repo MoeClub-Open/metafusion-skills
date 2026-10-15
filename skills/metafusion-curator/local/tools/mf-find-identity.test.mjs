@@ -41,8 +41,8 @@ test("同名候选分别保留，canonical 汇聚保留原始 ID 与理由", asy
 });
 
 test("外部 ID、数字属性和数组属性仍保留独立匹配理由", async () => {
-  const item = entity("w", { external_ids: { wikidata: "Q123" }, attributes: { duration: 213, version_label: ["live", "studio"] } });
-  const report = await findIdentity({ titles: ["夜明け"], externalIds: [{ provider: "wikidata", value: "Q123" }],
+  const item = entity("w", { external_links: { wikidata: "Q123" }, attributes: { duration: 213, version_label: ["live", "studio"] } });
+  const report = await findIdentity({ titles: ["夜明け"], externalIds: [{ kind: "wikidata", value: "Q123" }],
     attributes: [{ key: "duration", value: "213" }, { key: "version_label", value: "live" }], requestFn: query(response([item])) });
   assert.deepEqual(new Set(report.candidates[0].matched_reasons.map((r) => r.query_mode)),
     new Set(["title_normalized_equality", "external_id_exact", "attribute_exact"]));

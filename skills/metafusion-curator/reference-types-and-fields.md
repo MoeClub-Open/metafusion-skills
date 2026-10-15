@@ -17,7 +17,7 @@
 
 ## 实体字段与动态属性
 
-title、original_language、translations、attributes、external_ids、pictures、status、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](reference-api-templates.md)。created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
+title、original_language、translations、attributes、external_links、pictures、status、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](reference-api-templates.md)。created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
 
 两个易错点：
 
@@ -104,7 +104,7 @@ title、original_language、translations、attributes、external_ids、pictures�
   **集数编号在各 `entry_role` 内各自起算**（本篇 1..N，OP/ED 各自从 1 起），不要把 OP 编成"第 13 话"。
 - `air_date` 是**篇目级放送/发布日**（逐话首播）；作品级开播日走 work 的 `broadcast_start` / `broadcast_end`。
 
-## `external_ids`
+## `external_links`
 
 键必须来自 `GET /api/catalog/external-databases` 的实际返回；外部库可由后台扩展，不以固定数量为准。未注册的键报
 `invalid_external_id`。预设带 `category`（`all` / `work` / `release` / `agent`）与校验正则，常见四条：
@@ -116,7 +116,7 @@ title、original_language、translations、attributes、external_ids、pictures�
 - `isrc`：12 位码（独立码）。
 
 **官网是"外部资料"面板的正式字段，不是只进 `sources` 的旁证。** 核到作品 / 发行 / 主体的官方站点后，
-除按来源策略在 `sources` 记录它，还要把它写进 `external_ids.official_website`：前端按 `sort_order`
+除按来源策略在 `sources` 记录它，还要把它写进 `external_links.official_website`：前端按 `sort_order`
 把官网排在面板首位并做"官方"高亮。只留在 `sources` 里页面不会出现任何官网入口——
 症状是"条目有 Wikipedia / Bangumi / Steam，却没有一条官方链接"。
 
