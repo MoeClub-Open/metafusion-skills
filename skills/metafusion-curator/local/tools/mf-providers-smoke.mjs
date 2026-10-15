@@ -25,33 +25,33 @@ const CHECK_IMAGES = argv.includes("--images");
 
 // 每个提供方一次最小请求；参数是真实存在的记录（不是编造的），便于逐字核对。
 const PLAN = [
-  { kind: "discogs", op: "discogs.search", arg: "daft punk discovery", expect: ["OK", "RATE_LIMITED"], why: "匿名 database/search" },
-  { kind: "discogs", op: "discogs.release", arg: "2879", expect: ["OK", "RATE_LIMITED"], why: "匿名 releases/{id}" },
-  { kind: "openlibrary", op: "openlibrary.search", arg: "the name of the rose", expect: ["OK"], why: "search.json" },
-  { kind: "openlibrary", op: "openlibrary.edition", arg: "OL56967691M", expect: ["OK"], why: "books/{id}.json" },
-  { kind: "openlibrary", op: "openlibrary.editions", arg: "OL8996439W", expect: ["OK"], why: "works/{id}/editions.json（找有封面的版本）" },
-  { kind: "openlibrary", op: "openlibrary.author", arg: "OL76088A", expect: ["OK"], why: "authors/{id}.json（remote_ids.isni）" },
-  { kind: "internetarchive", op: "archive.item", arg: "hot-buttered-rum-internet-archive-2022", expect: ["OK"], why: "/metadata/{identifier}" },
-  { kind: "internetarchive", op: "archive.wayback", arg: "https://vgmdb.net/album/111949", expect: ["OK", "NOT_FOUND"], why: "wayback/available" },
-  { kind: "tmdb", op: "tmdb.movie", arg: "550", expect: ["OK", "NO_KEY"], why: "需 TMDB_API_KEY / TMDB_ACCESS_TOKEN" },
-  { kind: "anilist", op: "anilist.media", arg: "20757", expect: ["OK"], why: "公开 GraphQL" },
-  { kind: "anilist", op: "anilist.search", arg: "Frieren", expect: ["OK"], why: "公开 GraphQL Page/media" },
-  { kind: "myanimelist", op: "mal.anime", arg: "1", expect: ["OK", "NO_KEY", "BLOCKED"], why: "匿名 403；需 MAL_CLIENT_ID" },
-  { kind: "isni", op: "isni.record", arg: "0000 0001 2138 9471", expect: ["OK", "BLOCKED"], why: "记录端点（实测被 Cloudflare 拦）" },
-  { kind: "viaf", op: "viaf.record", arg: "59163545", expect: ["OK", "UNAVAILABLE", "BLOCKED"], why: "记录端点（实测网关 404）" },
-  { kind: "oclc", op: "oclc.fast", arg: "mark twain", expect: ["OK", "UNAVAILABLE", "BLOCKED"], anonymousProbe: true, why: "FAST（匿名端点，实测网关错误）" },
-  { kind: "ndl", op: "ndl.authority", arg: "00130315", expect: ["OK"], why: "id.ndl.go.jp 权威 JSON-LD" },
-  { kind: "vgmdb", op: "vgmdb.album", arg: "111949", expect: ["OK", "BLOCKED"], why: "直连（实测反爬 403）" },
-  { kind: "vgmdb", op: "vgmdb.archive", arg: "111949", expect: ["OK", "NOT_FOUND", "UNAVAILABLE"], why: "经 Internet Archive id_ 存档（2 次请求）" },
-  { kind: "itunes", op: "itunes.search", arg: "AQUAPLUS", expect: ["OK"], why: "免费 Search API（media=music&entity=album，country=jp）" },
-  { kind: "itunes", op: "itunes.album", arg: "541874266", expect: ["OK"], why: "lookup?id=<collectionId>&entity=song（含曲目）" },
-  { kind: "steam", op: "steam.app", arg: "504230 langs=english,japanese,schinese", expect: ["OK"], why: "appdetails（AppID 504230 Celeste；三语种串行）" },
-  { kind: "steam", op: "steam.search", arg: "Celeste", expect: ["OK"], why: "storesearch 候选（含原声/DLC 类型）" },
-  { kind: "coverartarchive", op: "caa.release", arg: "23fd33ae-3d3d-4414-b5f1-94bf374bff90", expect: ["OK", "NOT_FOUND"], why: "发行版封面索引；无 front 不产生主候选" },
-  { kind: "kitsu", op: "kitsu.anime", arg: "46474", expect: ["OK"], why: "JSON:API 条目；证据 URL 为实际 API" },
-  { kind: "vndb", op: "vndb.vn", arg: "v17", expect: ["OK"], why: "POST /kana/vn；证据保留请求方法" },
-  { kind: "openbd", op: "openbd.isbn", arg: "9784048923514", expect: ["OK", "NOT_FOUND"], why: "ONIX 书目；[null] 只表示未收录" },
-  { kind: "gutenberg", op: "gutenberg.ebook", arg: "1513", expect: ["OK"], why: "ebook RDF；封面 URL 必须来自 hasFormat" },
+  { provider: "discogs", op: "discogs.search", arg: "daft punk discovery", expect: ["OK", "RATE_LIMITED"], why: "匿名 database/search" },
+  { provider: "discogs", op: "discogs.release", arg: "2879", expect: ["OK", "RATE_LIMITED"], why: "匿名 releases/{id}" },
+  { provider: "openlibrary", op: "openlibrary.search", arg: "the name of the rose", expect: ["OK"], why: "search.json" },
+  { provider: "openlibrary", op: "openlibrary.edition", arg: "OL56967691M", expect: ["OK"], why: "books/{id}.json" },
+  { provider: "openlibrary", op: "openlibrary.editions", arg: "OL8996439W", expect: ["OK"], why: "works/{id}/editions.json（找有封面的版本）" },
+  { provider: "openlibrary", op: "openlibrary.author", arg: "OL76088A", expect: ["OK"], why: "authors/{id}.json（remote_ids.isni）" },
+  { provider: "internetarchive", op: "archive.item", arg: "hot-buttered-rum-internet-archive-2022", expect: ["OK"], why: "/metadata/{identifier}" },
+  { provider: "internetarchive", op: "archive.wayback", arg: "https://vgmdb.net/album/111949", expect: ["OK", "NOT_FOUND"], why: "wayback/available" },
+  { provider: "tmdb", op: "tmdb.movie", arg: "550", expect: ["OK", "NO_KEY"], why: "需 TMDB_API_KEY / TMDB_ACCESS_TOKEN" },
+  { provider: "anilist", op: "anilist.media", arg: "20757", expect: ["OK"], why: "公开 GraphQL" },
+  { provider: "anilist", op: "anilist.search", arg: "Frieren", expect: ["OK"], why: "公开 GraphQL Page/media" },
+  { provider: "myanimelist", op: "mal.anime", arg: "1", expect: ["OK", "NO_KEY", "BLOCKED"], why: "匿名 403；需 MAL_CLIENT_ID" },
+  { provider: "isni", op: "isni.record", arg: "0000 0001 2138 9471", expect: ["OK", "BLOCKED"], why: "记录端点（实测被 Cloudflare 拦）" },
+  { provider: "viaf", op: "viaf.record", arg: "59163545", expect: ["OK", "UNAVAILABLE", "BLOCKED"], why: "记录端点（实测网关 404）" },
+  { provider: "oclc", op: "oclc.fast", arg: "mark twain", expect: ["OK", "UNAVAILABLE", "BLOCKED"], anonymousProbe: true, why: "FAST（匿名端点，实测网关错误）" },
+  { provider: "ndl", op: "ndl.authority", arg: "00130315", expect: ["OK"], why: "id.ndl.go.jp 权威 JSON-LD" },
+  { provider: "vgmdb", op: "vgmdb.album", arg: "111949", expect: ["OK", "BLOCKED"], why: "直连（实测反爬 403）" },
+  { provider: "vgmdb", op: "vgmdb.archive", arg: "111949", expect: ["OK", "NOT_FOUND", "UNAVAILABLE"], why: "经 Internet Archive id_ 存档（2 次请求）" },
+  { provider: "itunes", op: "itunes.search", arg: "AQUAPLUS", expect: ["OK"], why: "免费 Search API（media=music&entity=album，country=jp）" },
+  { provider: "itunes", op: "itunes.album", arg: "541874266", expect: ["OK"], why: "lookup?id=<collectionId>&entity=song（含曲目）" },
+  { provider: "steam", op: "steam.app", arg: "504230 langs=english,japanese,schinese", expect: ["OK"], why: "appdetails（AppID 504230 Celeste；三语种串行）" },
+  { provider: "steam", op: "steam.search", arg: "Celeste", expect: ["OK"], why: "storesearch 候选（含原声/DLC 类型）" },
+  { provider: "coverartarchive", op: "caa.release", arg: "23fd33ae-3d3d-4414-b5f1-94bf374bff90", expect: ["OK", "NOT_FOUND"], why: "发行版封面索引；无 front 不产生主候选" },
+  { provider: "kitsu", op: "kitsu.anime", arg: "46474", expect: ["OK"], why: "JSON:API 条目；证据 URL 为实际 API" },
+  { provider: "vndb", op: "vndb.vn", arg: "v17", expect: ["OK"], why: "POST /kana/vn；证据保留请求方法" },
+  { provider: "openbd", op: "openbd.isbn", arg: "9784048923514", expect: ["OK", "NOT_FOUND"], why: "ONIX 书目；[null] 只表示未收录" },
+  { provider: "gutenberg", op: "gutenberg.ebook", arg: "1513", expect: ["OK"], why: "ebook RDF；封面 URL 必须来自 hasFormat" },
 ];
 
 const KIND_TO_OUTCOME = {
@@ -93,7 +93,7 @@ export async function runSmoke() {
     if (ONLY.length && !ONLY.includes(step.provider) && !ONLY.includes(step.op)) continue;
     const cred = hasCredential(step.provider);
     const started = Date.now();
-    let row = { kind: step.provider, op: step.op, why: step.why, expects: step.expect, credential: cred.needed ? (cred.present.length ? "已配置 " + cred.present.join(",") : "未配置（" + (PROVIDER_MATRIX[step.provider].credentialEnv || []).join(" / ") + "）") : "匿名" };
+    let row = { provider: step.provider, op: step.op, why: step.why, expects: step.expect, credential: cred.needed ? (cred.present.length ? "已配置 " + cred.present.join(",") : "未配置（" + (PROVIDER_MATRIX[step.provider].credentialEnv || []).join(" / ") + "）") : "匿名" };
     // 只有"这个 op 真的需要凭据且没配"才跳过；像 OCLC FAST 这种匿名端点即使矩阵标 credential 也要实测一次。
     const needsCredential = step.anonymousProbe ? false : (cred.needed && !cred.present.length);
     if (needsCredential) {

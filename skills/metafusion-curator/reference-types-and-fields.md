@@ -116,7 +116,7 @@ title、original_language、translations、attributes、external_links、picture
 - `isrc`：12 位码（独立码）。
 
 **官网是"外部资料"面板的正式字段，不是只进 `sources` 的旁证。** 核到作品 / 发行 / 主体的官方站点后，
-除按来源策略在 `sources` 记录它，还要把它写进 `external_links.official_website`：前端按 `sort_order`
+除按来源策略在 `sources` 记录它，还要把它写进 `external_links` 中 `kind="official_website"` 的 `url`：前端按 `sort_order`
 把官网排在面板首位并做"官方"高亮。只留在 `sources` 里页面不会出现任何官网入口——
 症状是"条目有 Wikipedia / Bangumi / Steam，却没有一条官方链接"。
 

@@ -266,9 +266,13 @@ export function unionInto(keep, lose, { kind } = {}) {
   for (const link of Array.isArray(lose.external_links) ? lose.external_links : []) {
     if (!link?.kind || !link?.url) continue;
     const key = `${link.kind}\0${link.url}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      if (j(ext.find((value) => `${value.kind}\0${value.url}` === key)) !== j(link))
+        conflicts.push(`external_links.${link.kind}`);
+      continue;
+    }
     const existing = keepBy.get(link.kind) || [];
-    if (existing.length && !existing.some((e) => linkIdentityValue(e) === linkIdentityValue(link))) {
+    if (existing.length) {
       conflicts.push(`external_links.${link.kind}`);
       continue;
     }

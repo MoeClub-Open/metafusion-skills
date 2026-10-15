@@ -321,7 +321,7 @@ test("every registered operation maps to its provider, authoritative, or publish
   const stubs = {
     runProviderOpImpl: async (op, arg, opts) => {
       routed.push({ backend: "provider", op, arg, opts });
-      return { kind: "fixture", raw: { hits: [{ id: "candidate-1", title: "Fixture" }] } };
+      return { provider: "fixture", raw: { hits: [{ id: "candidate-1", title: "Fixture" }] } };
     },
     runAuthoritativeOpImpl: async (op, arg, opts) => {
       routed.push({ backend: "authoritative", op, arg, opts });
@@ -376,7 +376,7 @@ test("publisher aliases resolve in help while canonical operation names match ru
 
 test("provider search results count raw hits/editions and expose candidate fields, not wrapper fields", async () => {
   const hitsResult = await dispatchSourceOperation("discogs.search", "Fixture", {
-    runProviderOpImpl: async () => ({ kind: "discogs", found: true, raw: { hits: [{ id: 10, title: "One" }, { id: 11, title: "Two" }] } }),
+    runProviderOpImpl: async () => ({ provider: "discogs", found: true, raw: { hits: [{ id: 10, title: "One" }, { id: 11, title: "Two" }] } }),
   });
   assert.equal(hitsResult.candidate_count, 2);
   assert.deepEqual(hitsResult.available_fields, ["id", "title"]);
@@ -384,7 +384,7 @@ test("provider search results count raw hits/editions and expose candidate field
   assert.match(hitsResult.search_note, /不保证覆盖/);
 
   const editionsResult = await dispatchSourceOperation("openlibrary.editions", "OL123W", {
-    runProviderOpImpl: async () => ({ kind: "openlibrary", raw: { editions: [{ key: "/books/OL1M", title: "Edition" }] } }),
+    runProviderOpImpl: async () => ({ provider: "openlibrary", raw: { editions: [{ key: "/books/OL1M", title: "Edition" }] } }),
   });
   assert.equal(editionsResult.candidate_count, 1);
   assert.deepEqual(editionsResult.available_fields, ["key", "title"]);

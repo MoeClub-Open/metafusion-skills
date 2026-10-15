@@ -17,7 +17,7 @@
 //      各家限流值见 README-providers.md 的提供方矩阵。
 //
 // 出参形状（所有 connector 一致，便于上层统一处理）：
-//   { provider, found, id, title, titles?, image_url, image_page_url?, dates?, external_links?,
+//   { provider, found, id, title, titles?, image_url, image_page_url?, dates?, external_ids?,
 //     url, sha256, request_url, request_method, human_page?, evidence_reads, raw, notes?, rights_note?, tracks? }
 // raw 保留提供方原始响应，便于逐字核对；本模块不替调用方判断"是不是同一个对象"，
 // 写入前仍须按 COMMON-BRIEF 第 2 条做三重核对。
@@ -274,7 +274,7 @@ function result(provider, fields) {
     image_url: null,
     image_page_url: null,
     dates: null,
-    external_links: null,
+    external_ids: null,
     url: null,
     raw: null,
     notes: null,
@@ -588,7 +588,7 @@ export function mapDiscogsRelease(data, kind) {
       release: isoDate(data.released),
       released_formatted: clean(data.released_formatted) || clean(data.released),
     },
-    external_links: {
+    external_ids: {
       discogs: String(data.id),
       master: data.master_id != null ? String(data.master_id) : null,
       barcode: barcode ? clean(barcode.value) : null,
@@ -618,7 +618,7 @@ export function mapDiscogsRelease(data, kind) {
 export async function fetchDiscogsRelease(idOrUrl, opts) {
   const id = normalizeDiscogsId(idOrUrl, "release");
   const url = "https://api.discogs.com/releases/" + id;
-  const res = await jsonRequest(url, Object.assign({ kind: "discogs" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "discogs" }, opts));
   if (res.notFound) return readResult(res, "discogs", { found: false, id: id, url: url, raw: res.raw, notes: "Discogs 返回 404（该 release 不存在或已删除）" });
   return attachReadEvidence(mapDiscogsRelease(res.json, "release"), res);
 }
@@ -626,10 +626,10 @@ export async function fetchDiscogsRelease(idOrUrl, opts) {
 export async function fetchDiscogsMaster(idOrUrl, opts) {
   const id = normalizeDiscogsId(idOrUrl, "master");
   const url = "https://api.discogs.com/masters/" + id;
-  const res = await jsonRequest(url, Object.assign({ kind: "discogs" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "discogs" }, opts));
   if (res.notFound) return readResult(res, "discogs", { found: false, id: id, url: url, raw: res.raw, notes: "Discogs master 404" });
   const mapped = mapDiscogsRelease(res.json, "master");
-  mapped.external_links = Object.assign({}, mapped.external_links, { master: id });
+  mapped.external_ids = Object.assign({}, mapped.external_ids, { master: id });
   mapped.notes = "master 记录（版本列表在 " + ((res.json && res.json.versions_url) ? res.json.versions_url : "缺") + "）；" + (mapped.notes || "");
   return attachReadEvidence(mapped, res);
 }
@@ -649,7 +649,7 @@ export async function searchDiscogs(query, opts) {
   if (o.catno) params.set("catno", o.catno);
   if (o.format) params.set("format", o.format);
   const url = "https://api.discogs.com/database/search?" + params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "discogs" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "discogs" }, o));
   const records = requireArrayField(res.json, "results", "discogs", "database/search");
   const hits = records.map((r) => requireSearchItem(r, "discogs", "database/search", ["id"], ["title"])).map((r) => ({
     id: String(r.id == null ? "" : r.id),
@@ -725,7 +725,7 @@ export function mapOpenLibraryBook(data, kindLabel) {
       created: data.created ? data.created.value || null : null,
       modified: data.last_modified ? data.last_modified.value || null : null,
     },
-    external_links: {
+    external_ids: {
       openlibrary: olid,
       isbn: isbn13.concat(isbn10).slice(0, 6),
       lccn: (data.lccn || []).length ? clean((data.lccn || [])[0]) : null,
@@ -748,7 +748,7 @@ export function mapOpenLibraryBook(data, kindLabel) {
 export async function lookupOpenLibraryEdition(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "book");
   const url = "https://openlibrary.org/books/" + olid + ".json";
-  const res = await jsonRequest(url, Object.assign({ kind: "openlibrary" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
   if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary edition 404" });
   return attachReadEvidence(mapOpenLibraryBook(res.json, "edition"), res);
 }
@@ -756,7 +756,7 @@ export async function lookupOpenLibraryEdition(olidOrUrl, opts) {
 export async function lookupOpenLibraryWork(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "work");
   const url = "https://openlibrary.org/works/" + olid + ".json";
-  const res = await jsonRequest(url, Object.assign({ kind: "openlibrary" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
   if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary work 404" });
   const data = requireObject(res.json, "openlibrary", "work");
   if (!clean(data.key) || !clean(data.title)) throw new ProviderError("parse", "openlibrary", "work 响应缺少 key 或 title", { retryable: false });
@@ -767,7 +767,7 @@ export async function lookupOpenLibraryWork(olidOrUrl, opts) {
     titles: { title: clean(data.title), subtitle: clean(data.subtitle) },
     image_url: cover ? openLibraryCoverUrl(cover, "L") : null,
     dates: { first_publish_year: clean(data.first_publish_date) },
-    external_links: { openlibrary: olid },
+    external_ids: { openlibrary: olid },
     url: "https://openlibrary.org/works/" + olid,
     notes: "subjects=" + (data.subjects || []).slice(0, 5).map(clean).join(",") + (data.edition_count != null ? "；edition_count=" + data.edition_count : ""),
     raw: data,
@@ -778,7 +778,7 @@ export async function lookupOpenLibraryWork(olidOrUrl, opts) {
 export async function lookupOpenLibraryAuthor(olidOrUrl, opts) {
   const olid = normalizeOpenLibraryId(olidOrUrl, "author");
   const url = "https://openlibrary.org/authors/" + olid + ".json";
-  const res = await jsonRequest(url, Object.assign({ kind: "openlibrary" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
   if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary author 404" });
   const data = requireObject(res.json, "openlibrary", "author");
   if (!clean(data.key) || !(clean(data.name) || clean(data.personal_name))) {
@@ -794,7 +794,7 @@ export async function lookupOpenLibraryAuthor(olidOrUrl, opts) {
       created: data.created ? data.created.value || null : null,
       modified: data.last_modified ? data.last_modified.value || null : null,
     },
-    external_links: {
+    external_ids: {
       openlibrary: olid,
       viaf: remote.viaf ? String(remote.viaf) : null,
       isni: remote.isni ? String(remote.isni) : null,
@@ -814,7 +814,7 @@ export async function listOpenLibraryEditions(olidOrUrl, opts) {
   const o = opts || {};
   const olid = normalizeOpenLibraryId(olidOrUrl, "work");
   const url = "https://openlibrary.org/works/" + olid + "/editions.json?limit=" + String(Math.min(100, Math.max(1, o.limit || 20)));
-  const res = await jsonRequest(url, Object.assign({ kind: "openlibrary" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, o));
   if (res.notFound) return readResult(res, "openlibrary", { found: false, id: olid, url: url, raw: res.raw, notes: "OpenLibrary work 不存在（editions 404）" });
   const rawEntries = requireArrayField(res.json, "entries", "openlibrary", "work editions");
   const entries = rawEntries.map((e) => requireSearchItem(e, "openlibrary", "work editions", ["key"], ["title"])).map((e) => ({
@@ -852,7 +852,7 @@ export async function searchOpenLibrary(query, opts) {
     fields: o.fields || "key,title,author_name,first_publish_year,cover_i,isbn,publish_date,publisher_name,language",
   });
   const url = "https://openlibrary.org/search.json?" + params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "openlibrary" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, o));
   const response = requireObject(res.json, "openlibrary", "search");
   const rawDocs = requireArrayField(response, "docs", "openlibrary", "search");
   if (!Number.isInteger(response.numFound) || response.numFound < 0) {
@@ -890,7 +890,7 @@ export async function lookupOpenLibraryByIsbn(isbn, opts) {
     throw new ProviderError("bad_input", "openlibrary", "ISBN 形状非法：" + raw.slice(0, 30));
   }
   const url = "https://openlibrary.org/search.json?q=isbn%3A" + cleanIsbn + "&limit=5&fields=key,title,cover_i,publish_date,first_publish_year,isbn";
-  const res = await jsonRequest(url, Object.assign({ kind: "openlibrary" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "openlibrary" }, opts));
   const response = requireObject(res.json, "openlibrary", "ISBN search");
   const docs = requireArrayField(response, "docs", "openlibrary", "ISBN search");
   if (!Number.isInteger(response.numFound) || response.numFound < 0) {
@@ -908,7 +908,7 @@ export async function lookupOpenLibraryByIsbn(isbn, opts) {
       publish: Array.isArray(hit.publish_date) ? clean(hit.publish_date[0]) : clean(hit.publish_date),
       first_publish_year: hit.first_publish_year != null ? String(hit.first_publish_year) : null,
     },
-    external_links: { isbn: [cleanIsbn], openlibrary: olKeyToId(hit.key) },
+    external_ids: { isbn: [cleanIsbn], openlibrary: olKeyToId(hit.key) },
     url: "https://openlibrary.org" + hit.key,
     notes: "ISBN 命中 " + docs.length + " 条记录，取第一条" + (docs.length > 1 ? "（多版本须人工确认）" : ""),
     raw: { isbn: cleanIsbn, docs: docs },
@@ -976,7 +976,7 @@ export function mapArchiveMetadata(data, identifier) {
       added: epochDay(metadata.addeddate),
       item_last_updated: epochDay(data.item_last_updated),
     },
-    external_links: {
+    external_ids: {
       identifier: identifier,
       mediatype: metadata.mediatype ? String(metadata.mediatype) : null,
       collection: Array.isArray(metadata.collection) ? metadata.collection.map(String) : (metadata.collection ? [String(metadata.collection)] : null),
@@ -992,7 +992,7 @@ export function mapArchiveMetadata(data, identifier) {
 export async function fetchArchiveItem(identifier, opts) {
   const id = normalizeArchiveIdentifier(identifier);
   const url = "https://archive.org/metadata/" + encodeURIComponent(id);
-  const res = await jsonRequest(url, Object.assign({ kind: "internetarchive" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "internetarchive" }, opts));
   if (res.notFound) return readResult(res, "internetarchive", { found: false, id: id, url: url, raw: res.raw, notes: "archive.org /metadata 返回 404" });
   return attachReadEvidence(mapArchiveMetadata(res.json, id), res);
 }
@@ -1010,7 +1010,7 @@ export async function searchArchive(query, opts) {
   params.set("sort", o.sort || "metadata.titleSort asc");
   params.set("output", "json");
   const url = "https://archive.org/advancedsearch.php?" + params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "internetarchive" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "internetarchive" }, o));
   const root = requireObject(res.json, "internetarchive", "advancedsearch");
   const response = requireObject(root.response, "internetarchive", "advancedsearch.response");
   const rawDocs = requireArrayField(response, "docs", "internetarchive", "advancedsearch.response");
@@ -1049,7 +1049,7 @@ export async function waybackSnapshot(archivedUrl, opts) {
   if (!/^https?:\/\//i.test(target)) throw new ProviderError("bad_input", "internetarchive", "需要完整 URL：" + target.slice(0, 80));
   const params = new URLSearchParams({ url: target });
   if (o.timestamp) params.set("timestamp", String(o.timestamp));
-  const res = await jsonRequest("https://archive.org/wayback/available?" + params.toString(), Object.assign({ kind: "internetarchive" }, o));
+  const res = await jsonRequest("https://archive.org/wayback/available?" + params.toString(), Object.assign({ provider: "internetarchive" }, o));
   const root = requireObject(res.json, "internetarchive", "Wayback availability");
   const snapshots = requireObject(root.archived_snapshots, "internetarchive", "Wayback archived_snapshots");
   const snap = snapshots.closest || null;
@@ -1111,7 +1111,7 @@ export function mapTmdbMedia(data, type) {
       birth: isPerson ? isoDate(data.birthday) : null,
       death: isPerson ? isoDate(data.deathday) : null,
     },
-    external_links: {
+    external_ids: {
       tmdb: String(data.id),
       imdb: data.imdb_id ? String(data.imdb_id) : null,
       homepage: data.homepage ? String(data.homepage) : null,
@@ -1166,7 +1166,7 @@ export async function fetchTmdbMedia(id, opts) {
     params: Object.assign({ language: o.language || "ja-JP" }, o.appendToResponse ? { append_to_response: o.appendToResponse } : {}),
   }, tmdbCredentialOverrides(o)));
   const url = "https://api.themoviedb.org/3/" + type + "/" + normId + "?" + cfg.params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "tmdb", headers: cfg.headers, credentialHint: "在环境变量 TMDB_API_KEY（v3）或 TMDB_ACCESS_TOKEN（v4）里配置" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "tmdb", headers: cfg.headers, credentialHint: "在环境变量 TMDB_API_KEY（v3）或 TMDB_ACCESS_TOKEN（v4）里配置" }, o));
   if (res.notFound) {
     return readResult(res, "tmdb", { found: false, id: normId, url: "https://www.themoviedb.org/" + type + "/" + normId, raw: res.raw, notes: "TMDB " + type + " " + normId + " 不存在（404）" });
   }
@@ -1184,7 +1184,7 @@ export async function searchTmdb(query, opts) {
   if (o.firstAirDateYear) base.first_air_date_year = String(o.firstAirDateYear);
   const cfg = tmdbRequestConfig(Object.assign({ purpose: "TMDB " + type + " 检索", params: base }, tmdbCredentialOverrides(o)));
   const url = "https://api.themoviedb.org/3/search/" + type + "?" + cfg.params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "tmdb", headers: cfg.headers, credentialHint: "配置 TMDB_API_KEY 或 TMDB_ACCESS_TOKEN" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "tmdb", headers: cfg.headers, credentialHint: "配置 TMDB_API_KEY 或 TMDB_ACCESS_TOKEN" }, o));
   const root = requireObject(res.json, "tmdb", "search");
   const rawHits = requireArrayField(root, "results", "tmdb", "search");
   if (!Number.isInteger(root.total_results) || root.total_results < 0) {
@@ -1269,7 +1269,7 @@ export function mapAniListMedia(data) {
     image_url: (data.coverImage && (data.coverImage.large || data.coverImage.medium)) || null,
     image_page_url: data.bannerImage || null,
     dates: { start: formatDatePart(data.startDate), end: formatDatePart(data.endDate), season: clean(data.season) },
-    external_links: { anilist: String(data.id) },
+    external_ids: { anilist: String(data.id) },
     url: data.siteUrl || ("https://anilist.co/anime/" + data.id),
     notes: [
       data.format ? "形式=" + clean(data.format) : null,
@@ -1393,7 +1393,7 @@ export function mapMalAnime(data) {
     },
     image_url: (data.main_picture && (data.main_picture.large || data.main_picture.medium)) || null,
     dates: { start: isoDate(data.start_date) || clean(data.start_date), end: isoDate(data.end_date) || clean(data.end_date) },
-    external_links: { myanimelist: String(data.id) },
+    external_ids: { myanimelist: String(data.id) },
     url: "https://myanimelist.net/anime/" + data.id,
     notes: [
       data.media_type ? "媒体=" + clean(data.media_type) : null,
@@ -1411,7 +1411,7 @@ export async function fetchMyAnimeList(idOrUrl, opts) {
   const parsed = normalizeMalId(idOrUrl, o.type);
   const clientId = malClientId(o, "MyAnimeList " + parsed.type + "/" + parsed.id + " 读取");
   const url = "https://api.myanimelist.net/v2/" + parsed.type + "/" + parsed.id + "?fields=" + (o.fields || MAL_FIELDS);
-  const res = await jsonRequest(url, Object.assign({ kind: "myanimelist", headers: { "X-MAL-CLIENT-ID": clientId } }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "myanimelist", headers: { "X-MAL-CLIENT-ID": clientId } }, o));
   if (res.notFound) {
     return readResult(res, "myanimelist", { found: false, id: parsed.id, url: "https://myanimelist.net/" + parsed.type + "/" + parsed.id, raw: res.raw, notes: "MyAnimeList " + parsed.type + " " + parsed.id + " 不存在（404）" });
   }
@@ -1430,7 +1430,7 @@ export async function searchMyAnimeList(query, opts) {
     fields: o.fields || ("id,title,main_picture,alternative_titles,start_date,end_date,media_type,num_episodes,mean"),
   });
   const res = await jsonRequest("https://api.myanimelist.net/v2/" + type + "?" + params.toString(),
-    Object.assign({ kind: "myanimelist", headers: { "X-MAL-CLIENT-ID": clientId } }, o));
+    Object.assign({ provider: "myanimelist", headers: { "X-MAL-CLIENT-ID": clientId } }, o));
   const data = requireArrayField(res.json, "data", "myanimelist", "search");
   const hits = data.map((n) => {
     const row = requireObject(n, "myanimelist", "search 候选项");
@@ -1552,7 +1552,7 @@ export async function fetchIsniRecord(isni, opts) {
   return readResult(res, "isni", {
     id: value,
     title: label,
-    external_links: { isni: value },
+    external_ids: { isni: value },
     url: url,
     notes: "content-type=" + (res.contentType || "?") + "；ISNI 记录本体",
     raw: res.text.slice(0, 4000),
@@ -1566,7 +1566,7 @@ export async function fetchViafRecord(viafId, opts) {
   const url = "https://viaf.org/viaf/" + id;
   let res;
   try {
-    res = await jsonRequest(url, Object.assign({ kind: "viaf", accept: "application/json", attempts: 1 }, opts));
+    res = await jsonRequest(url, Object.assign({ provider: "viaf", accept: "application/json", attempts: 1 }, opts));
   } catch (err) {
     if (err instanceof ProviderError && (err.kind === "unavailable" || err.kind === "blocked")) {
       throw new ProviderError("unavailable", "viaf",
@@ -1593,7 +1593,7 @@ export async function fetchViafRecord(viafId, opts) {
   return readResult(res, "viaf", {
     id: id,
     title: heading,
-    external_links: { viaf: id },
+    external_ids: { viaf: id },
     url: url,
     notes: "VIAF 主标题；仍需与其他权威记录交叉核对",
     raw: record,
@@ -1612,7 +1612,7 @@ export async function fetchOclcFastHeading(query, opts) {
   let bodyText;
   let bodyUrl = "https://fast.oclc.org/searchfast/fastsuggest";
   try {
-    const res = await httpRequest("https://fast.oclc.org/searchfast/fastsuggest?" + params.toString(), Object.assign({ kind: "oclc" }, o));
+    const res = await httpRequest("https://fast.oclc.org/searchfast/fastsuggest?" + params.toString(), Object.assign({ provider: "oclc" }, o));
     bodyText = res.text;
     bodyUrl = res.url || bodyUrl;
   } catch (err) {
@@ -1684,7 +1684,7 @@ export function mapNdlAuthority(data, id) {
       birth: clean(topic.dateOfBirth), death: clean(topic.dateOfDeath),
       created: clean(data.created), modified: clean(data.modified),
     },
-    external_links: {
+    external_ids: {
       ndlna: id,
       uri: data.uri || ("http://id.ndl.go.jp/auth/ndlna/" + id),
       viaf: viafList.length ? viafList : null,
@@ -1702,7 +1702,7 @@ export function mapNdlAuthority(data, id) {
 export async function fetchNdlAuthority(idOrUrl, opts) {
   const id = normalizeNdlAuthorityId(idOrUrl);
   const url = "https://id.ndl.go.jp/auth/ndlna/" + id + ".json";
-  const res = await jsonRequest(url, Object.assign({ kind: "ndl" }, opts));
+  const res = await jsonRequest(url, Object.assign({ provider: "ndl" }, opts));
   if (res.notFound) {
     return readResult(res, "ndl", { found: false, id: id, url: url, raw: res.raw, notes: "NDL 权威记录 " + id + " 不存在（404；书志 LD / ndlsht / ncl 当前也可能 404，见矩阵）" });
   }
@@ -1814,7 +1814,7 @@ export function parseVgmdbAlbumHtml(html, info) {
       release_raw: clean(infoMap["Release Date"]),
       copyright: parseEnglishDate(infoMap["Copyright Date"]) || clean(infoMap["Copyright Date"]),
     },
-    external_links: { vgmdb: id ? String(id) : null, catalog_number: catalog },
+    external_ids: { vgmdb: id ? String(id) : null, catalog_number: catalog },
     url: canonical || (id ? "https://vgmdb.net/album/" + id : null),
     notes: [
       infoMap["Publish Format"] ? "发行形式=" + infoMap["Publish Format"] : null,
@@ -2059,7 +2059,7 @@ export async function searchItunes(query, opts) {
     limit: String(Math.min(200, Math.max(1, o.limit || 5))),
   });
   const url = "https://itunes.apple.com/search?" + params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "itunes" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "itunes" }, o));
   const response = requireObject(res.json, "itunes", "search");
   const rawResults = requireArrayField(response, "results", "itunes", "search");
   if (!Number.isInteger(response.resultCount) || response.resultCount < 0) {
@@ -2092,7 +2092,7 @@ export async function lookupItunesAlbum(idOrUrl, opts) {
   const storefront = itunesStorefront(parsed.storefront, o.storefront);
   const params = new URLSearchParams({ id: id, entity: "song", country: storefront });
   const url = "https://itunes.apple.com/lookup?" + params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "itunes" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "itunes" }, o));
   const response = requireObject(res.json, "itunes", "lookup");
   const rawResults = requireArrayField(response, "results", "itunes", "lookup");
   if (!Number.isInteger(response.resultCount) || response.resultCount < 0) {
@@ -2147,7 +2147,7 @@ export async function lookupItunesAlbum(idOrUrl, opts) {
       release: itunesReleaseDate(collection.releaseDate),
       release_raw: clean(collection.releaseDate),
     },
-    external_links: {
+    external_ids: {
       itunes: String(collection.collectionId),
       artist_id: collection.artistId != null ? String(collection.artistId) : null,
       upc: collection.upc != null && String(collection.upc).trim() ? String(collection.upc) : null,
@@ -2340,7 +2340,7 @@ export async function fetchSteamApp(idOrUrl, opts) {
   for (const lang of langs) {
     const params = new URLSearchParams({ appids: id, l: lang, cc: cc });
     const url = STEAM_STORE + "/api/appdetails?" + params.toString();
-    const res = await jsonRequest(url, Object.assign({ kind: "steam" }, o));
+    const res = await jsonRequest(url, Object.assign({ provider: "steam" }, o));
     reads.push({ ...res, language: lang });
     if (res.notFound) {
       success[lang] = null;
@@ -2428,7 +2428,7 @@ export async function fetchSteamApp(idOrUrl, opts) {
       coming_soon: primaryRelease.coming_soon === true,
       by_lang: releaseByLang,
     },
-    external_links: { steam: id },
+    external_ids: { steam: id },
     url: steamStoreUrl(id),
     type: clean(primary.type),
     developers: Array.isArray(primary.developers) ? primary.developers.map(clean).filter(Boolean) : [],
@@ -2461,7 +2461,7 @@ export async function searchSteam(query, opts) {
   const cc = steamCc(parsed, o);
   const params = new URLSearchParams({ term: parsed.value, l: lang, cc: cc });
   const url = STEAM_STORE + "/api/storesearch/?" + params.toString();
-  const res = await jsonRequest(url, Object.assign({ kind: "steam" }, o));
+  const res = await jsonRequest(url, Object.assign({ provider: "steam" }, o));
   if (res.notFound) {
     return readResult(res, "steam", {
       found: false,
@@ -2631,7 +2631,7 @@ export async function fetchCoverArtArchive(idOrUrl, opts) {
   const o = opts || {};
   const ref = normalizeCoverArtRef(idOrUrl, o.kind);
   const url = coverArtPageUrl(ref.kind, ref.id);
-  const res = await httpRequest(url, Object.assign({ kind: "coverartarchive", accept: "application/json" }, o));
+  const res = await httpRequest(url, Object.assign({ provider: "coverartarchive", accept: "application/json" }, o));
 
   if (res.notFound) {
     const body = String(res.text || "").replace(/\s+/g, " ").trim();
@@ -2856,7 +2856,7 @@ export async function fetchKitsuMedia(idOrUrl, opts) {
     bySlug = true;
     url = KITSU_BASE + "/" + ref.kind + "?" + new URLSearchParams({ "filter[slug]": ref.slug, "page[limit]": "2" }).toString();
   }
-  const res = await httpRequest(url, Object.assign({ kind: "kitsu", accept: "application/vnd.api+json" }, o));
+  const res = await httpRequest(url, Object.assign({ provider: "kitsu", accept: "application/vnd.api+json" }, o));
 
   if (res.notFound) {
     if (bySlug) {
@@ -2918,7 +2918,7 @@ export async function fetchKitsuMedia(idOrUrl, opts) {
 
   return readResult(res, "kitsu", Object.assign({}, mapped, {
     kind: ref.kind,
-    external_links: { kitsu: mapped.id },
+    external_ids: { kitsu: mapped.id },
     image_url: mapped.poster && mapped.poster.large ? mapped.poster.large.url
       : (mapped.poster && mapped.poster.original ? mapped.poster.original.url : null),
     image_page_url: mapped.url,
@@ -2936,7 +2936,7 @@ export async function searchKitsu(query, opts) {
   const kind = KITSU_KINDS.includes(o.kind) ? o.kind : "anime";
   const limit = Number.isFinite(Number(o.limit)) && Number(o.limit) > 0 ? Math.min(20, Math.floor(Number(o.limit))) : 5;
   const url = KITSU_BASE + "/" + kind + "?" + new URLSearchParams({ "filter[text]": raw, "page[limit]": String(limit) }).toString();
-  const res = await httpRequest(url, Object.assign({ kind: "kitsu", accept: "application/vnd.api+json" }, o));
+  const res = await httpRequest(url, Object.assign({ provider: "kitsu", accept: "application/vnd.api+json" }, o));
   if (res.notFound) {
     throw new ProviderError("unavailable", "kitsu", "检索端点返回 HTTP " + res.status + "，不能据此判定无匹配条目",
       { status: res.status, url: url, retryable: true });
@@ -3170,7 +3170,7 @@ export async function fetchVndbVn(idOrUrl, opts) {
     image_url: clean(image && image.url),
     image_page_url: url,
     dates: { release: released, release_raw: clean(row.released) },
-    external_links: { vndb: id },
+    external_ids: { vndb: id },
     url: url,
     alttitle: clean(row.alttitle),
     aliases: Array.isArray(row.aliases) ? row.aliases.map(clean).filter(Boolean) : [],
@@ -3300,7 +3300,7 @@ export async function fetchVndbCharacter(idOrUrl, opts) {
     title: clean(row.name),
     image_url: clean(image && image.url),
     image_page_url: url,
-    external_links: { vndb_character: id },
+    external_ids: { vndb_character: id },
     url: url,
     original_name: clean(row.original),
     aliases: Array.isArray(row.aliases) ? row.aliases.map(clean).filter(Boolean) : [],
@@ -3351,7 +3351,7 @@ export async function fetchVndbStaff(idOrUrl, opts) {
   return readResult(res, "vndb", {
     id: id,
     title: clean(row.name),
-    external_links: { vndb_staff: id },
+    external_ids: { vndb_staff: id },
     url: url,
     original_name: clean(row.original),
     aliases: aliases,
@@ -3368,7 +3368,7 @@ export async function fetchVndbStaff(idOrUrl, opts) {
 export async function fetchVndbSchema(_arg, opts) {
   const o = opts || {};
   const url = VNDB_API + "/schema";
-  const res = await httpRequest(url, Object.assign({ kind: "vndb", accept: "application/json" }, o));
+  const res = await httpRequest(url, Object.assign({ provider: "vndb", accept: "application/json" }, o));
   if (res.notFound) {
     throw new ProviderError("unavailable", "vndb", "schema 端点返回 HTTP " + res.status,
       { status: res.status, url: url, retryable: true });
@@ -3491,7 +3491,7 @@ export async function lookupOpenbdByIsbn(isbnOrUrl, opts) {
   const o = opts || {};
   const isbn = normalizeIsbn(isbnOrUrl, "openbd");
   const url = OPENBD_BASE + "/get?" + new URLSearchParams({ isbn: isbn }).toString();
-  const res = await httpRequest(url, Object.assign({ kind: "openbd", accept: "application/json" }, o));
+  const res = await httpRequest(url, Object.assign({ provider: "openbd", accept: "application/json" }, o));
 
   if (res.notFound) {
     throw new ProviderError("unavailable", "openbd",
@@ -3517,7 +3517,7 @@ export async function lookupOpenbdByIsbn(isbnOrUrl, opts) {
       found: false,
       id: isbn,
       url: url,
-      external_links: { openbd: isbn },
+      external_ids: { openbd: isbn },
       notes: "OpenBD 对 ISBN " + isbn + " 返回 [null]：没有收录。"
         + (checksum.valid === false ? "另外该 ISBN 校验位不通过（" + checksum.scheme + "），先确认这串数字是不是写错了。" : "")
         + "OpenBD 只收日本出版物——台版、繁中版、简体引进版返回 [null] 是收录范围问题，不是站点故障，"
@@ -3551,7 +3551,7 @@ export async function lookupOpenbdByIsbn(isbnOrUrl, opts) {
       publish_raw: clean(summary.pubdate),
       candidates: pubdates,
     },
-    external_links: { openbd: isbn },
+    external_ids: { openbd: isbn },
     url: url,
     isbn: isbn,
     isbn_checksum: checksum,
@@ -3740,7 +3740,7 @@ export async function fetchGutenbergEbook(idOrUrl, opts) {
     image_url: coverMedium || coverSmall || null,
     image_page_url: page,
     dates: { release: issued, release_raw: record.issued },
-    external_links: { gutenberg: id },
+    external_ids: { gutenberg: id },
     url: page,
     rdf_url: url,
     languages: record.languages,
@@ -3797,7 +3797,7 @@ export async function searchGutenberg(query, opts) {
   const raw = String(query == null ? "" : query).trim();
   if (!raw) throw new ProviderError("bad_input", "gutenberg", "检索词不能为空");
   const url = GUTENBERG_BASE + "/ebooks/search/?" + new URLSearchParams({ query: raw }).toString();
-  const res = await httpRequest(url, Object.assign({ kind: "gutenberg", accept: "text/html" }, o));
+  const res = await httpRequest(url, Object.assign({ provider: "gutenberg", accept: "text/html" }, o));
   if (res.notFound) {
     throw new ProviderError("unavailable", "gutenberg", "检索端点返回 HTTP " + res.status + "，不能据此判定无匹配书目",
       { status: res.status, url: url, retryable: true });
@@ -3826,48 +3826,48 @@ export async function searchGutenberg(query, opts) {
 // ───────────────────────── 汇总入口（CLI 与 smoke 共用） ─────────────────────────
 
 export const PROVIDER_OPS = {
-  "discogs.release": { kind: "discogs", label: "Discogs release（数字或 /release/<id> 链接）", run: (arg, o) => fetchDiscogsRelease(arg, o) },
-  "discogs.master": { kind: "discogs", label: "Discogs master", run: (arg, o) => fetchDiscogsMaster(arg, o) },
-  "discogs.search": { kind: "discogs", label: "Discogs 检索", run: (arg, o) => searchDiscogs(arg, o) },
-  "openlibrary.edition": { kind: "openlibrary", label: "OpenLibrary edition", run: (arg, o) => lookupOpenLibraryEdition(arg, o) },
-  "openlibrary.work": { kind: "openlibrary", label: "OpenLibrary work", run: (arg, o) => lookupOpenLibraryWork(arg, o) },
-  "openlibrary.author": { kind: "openlibrary", label: "OpenLibrary author（含 ISNI / VIAF 线索）", run: (arg, o) => lookupOpenLibraryAuthor(arg, o) },
-  "openlibrary.search": { kind: "openlibrary", label: "OpenLibrary 检索", run: (arg, o) => searchOpenLibrary(arg, o) },
-  "openlibrary.editions": { kind: "openlibrary", label: "OpenLibrary work 版本列表", run: (arg, o) => listOpenLibraryEditions(arg, o) },
-  "openlibrary.isbn": { kind: "openlibrary", label: "OpenLibrary 按 ISBN", run: (arg, o) => lookupOpenLibraryByIsbn(arg, o) },
-  "archive.item": { kind: "internetarchive", label: "archive.org 条目元数据", run: (arg, o) => fetchArchiveItem(arg, o) },
-  "archive.search": { kind: "internetarchive", label: "archive.org advancedsearch", run: (arg, o) => searchArchive(arg, o) },
-  "archive.wayback": { kind: "internetarchive", label: "Wayback 可用性", run: (arg, o) => waybackSnapshot(arg, o) },
-  "tmdb.movie": { kind: "tmdb", label: "TMDB movie（需 key）", run: (arg, o) => fetchTmdbMedia(arg, Object.assign({ type: "movie" }, o)) },
-  "tmdb.tv": { kind: "tmdb", label: "TMDB tv（需 key）", run: (arg, o) => fetchTmdbMedia(arg, Object.assign({ type: "tv" }, o)) },
-  "tmdb.search": { kind: "tmdb", label: "TMDB 检索（需 key）", run: (arg, o) => searchTmdb(arg, o) },
-  "anilist.media": { kind: "anilist", label: "AniList media", run: (arg, o) => fetchAniListMedia(arg, o) },
-  "anilist.search": { kind: "anilist", label: "AniList 检索", run: (arg, o) => searchAniList(arg, o) },
-  "mal.anime": { kind: "myanimelist", label: "MyAnimeList anime（需 client id）", run: (arg, o) => fetchMyAnimeList(arg, o) },
-  "mal.search": { kind: "myanimelist", label: "MyAnimeList 检索（需 client id）", run: (arg, o) => searchMyAnimeList(arg, o) },
-  "isni.record": { kind: "isni", label: "ISNI 记录（访问状态见日期快照）", run: (arg, o) => fetchIsniRecord(arg, o) },
-  "viaf.record": { kind: "viaf", label: "VIAF 记录（访问状态见日期快照）", run: (arg, o) => fetchViafRecord(arg, o) },
-  "oclc.fast": { kind: "oclc", label: "OCLC FAST（需凭据 / 已变更）", run: (arg, o) => fetchOclcFastHeading(arg, o) },
-  "ndl.authority": { kind: "ndl", label: "NDL Linked Data 权威记录", run: (arg, o) => fetchNdlAuthority(arg, o) },
-  "vgmdb.album": { kind: "vgmdb", label: "VGMdb 专辑（直连；被拦时抛 blocked）", run: (arg, o) => fetchVgmdbAlbum(arg, o) },
-  "vgmdb.archive": { kind: "vgmdb", label: "VGMdb 专辑（经 Internet Archive 存档）", run: (arg, o) => fetchVgmdbAlbumViaArchive(arg, o) },
-  "itunes.search": { kind: "itunes", label: "iTunes Store 专辑检索（可带 country=xx，默认 jp）", run: (arg, o) => searchItunes(arg, o) },
-  "itunes.album": { kind: "itunes", label: "iTunes Store 专辑 + 曲目（数字 collectionId 或专辑链接）", run: (arg, o) => lookupItunesAlbum(arg, o) },
-  "steam.app": { kind: "steam", label: "Steam 应用资料（AppID 或商店/steamdb 链接；可带 langs=/cc=）", run: (arg, o) => fetchSteamApp(arg, o) },
-  "steam.search": { kind: "steam", label: "Steam 商店检索（可带 lang=/cc=）", run: (arg, o) => searchSteam(arg, o) },
-  "caa.release": { kind: "coverartarchive", label: "Cover Art Archive 发行版封面图组（release MBID 或链接）", run: (arg, o) => fetchCoverArtArchive(arg, Object.assign({ kind: "release" }, o)) },
-  "caa.release-group": { kind: "coverartarchive", label: "Cover Art Archive 发行组封面图组（release-group MBID 或链接；图属选定发行版）", run: (arg, o) => fetchCoverArtArchive(arg, Object.assign({ kind: "release-group" }, o)) },
-  "kitsu.anime": { kind: "kitsu", label: "Kitsu 动画条目（数字 id / slug / kitsu.io/anime/… 链接）", run: (arg, o) => fetchKitsuMedia(arg, Object.assign({ kind: "anime" }, o)) },
-  "kitsu.manga": { kind: "kitsu", label: "Kitsu 漫画条目（数字 id / slug / kitsu.io/manga/… 链接）", run: (arg, o) => fetchKitsuMedia(arg, Object.assign({ kind: "manga" }, o)) },
-  "kitsu.search": { kind: "kitsu", label: "Kitsu 检索（默认 anime；kind=manga 换层级）", run: (arg, o) => searchKitsu(arg, o) },
-  "vndb.vn": { kind: "vndb", label: "VNDB 作品条目（v<数字> / 裸数字 / vndb.org/v<数字> 链接）", run: (arg, o) => fetchVndbVn(arg, o) },
-  "vndb.releases": { kind: "vndb", label: "VNDB 某作品下的版次（品番 / 条码 / 载体枚数 / 发行方与开发方分工）", run: (arg, o) => fetchVndbReleases(arg, o) },
-  "vndb.character": { kind: "vndb", label: "VNDB 角色条目（c<数字>）", run: (arg, o) => fetchVndbCharacter(arg, o) },
-  "vndb.staff": { kind: "vndb", label: "VNDB 职员条目（s<数字>）", run: (arg, o) => fetchVndbStaff(arg, o) },
-  "vndb.schema": { kind: "vndb", label: "VNDB API 权威字段名与枚举（fields/filters 报错时查这个，不用试错）", run: (arg, o) => fetchVndbSchema(arg, o) },
-  "openbd.isbn": { kind: "openbd", label: "OpenBD 日本出版物书目（ISBN-13 / ISBN-10）", run: (arg, o) => lookupOpenbdByIsbn(arg, o) },
-  "gutenberg.ebook": { kind: "gutenberg", label: "Project Gutenberg 电子书书目（数字 id 或 /ebooks/<id> 链接，读 RDF）", run: (arg, o) => fetchGutenbergEbook(arg, o) },
-  "gutenberg.search": { kind: "gutenberg", label: "Project Gutenberg 检索（候选须逐条核对署名）", run: (arg, o) => searchGutenberg(arg, o) },
+  "discogs.release": { provider: "discogs", label: "Discogs release（数字或 /release/<id> 链接）", run: (arg, o) => fetchDiscogsRelease(arg, o) },
+  "discogs.master": { provider: "discogs", label: "Discogs master", run: (arg, o) => fetchDiscogsMaster(arg, o) },
+  "discogs.search": { provider: "discogs", label: "Discogs 检索", run: (arg, o) => searchDiscogs(arg, o) },
+  "openlibrary.edition": { provider: "openlibrary", label: "OpenLibrary edition", run: (arg, o) => lookupOpenLibraryEdition(arg, o) },
+  "openlibrary.work": { provider: "openlibrary", label: "OpenLibrary work", run: (arg, o) => lookupOpenLibraryWork(arg, o) },
+  "openlibrary.author": { provider: "openlibrary", label: "OpenLibrary author（含 ISNI / VIAF 线索）", run: (arg, o) => lookupOpenLibraryAuthor(arg, o) },
+  "openlibrary.search": { provider: "openlibrary", label: "OpenLibrary 检索", run: (arg, o) => searchOpenLibrary(arg, o) },
+  "openlibrary.editions": { provider: "openlibrary", label: "OpenLibrary work 版本列表", run: (arg, o) => listOpenLibraryEditions(arg, o) },
+  "openlibrary.isbn": { provider: "openlibrary", label: "OpenLibrary 按 ISBN", run: (arg, o) => lookupOpenLibraryByIsbn(arg, o) },
+  "archive.item": { provider: "internetarchive", label: "archive.org 条目元数据", run: (arg, o) => fetchArchiveItem(arg, o) },
+  "archive.search": { provider: "internetarchive", label: "archive.org advancedsearch", run: (arg, o) => searchArchive(arg, o) },
+  "archive.wayback": { provider: "internetarchive", label: "Wayback 可用性", run: (arg, o) => waybackSnapshot(arg, o) },
+  "tmdb.movie": { provider: "tmdb", label: "TMDB movie（需 key）", run: (arg, o) => fetchTmdbMedia(arg, Object.assign({ type: "movie" }, o)) },
+  "tmdb.tv": { provider: "tmdb", label: "TMDB tv（需 key）", run: (arg, o) => fetchTmdbMedia(arg, Object.assign({ type: "tv" }, o)) },
+  "tmdb.search": { provider: "tmdb", label: "TMDB 检索（需 key）", run: (arg, o) => searchTmdb(arg, o) },
+  "anilist.media": { provider: "anilist", label: "AniList media", run: (arg, o) => fetchAniListMedia(arg, o) },
+  "anilist.search": { provider: "anilist", label: "AniList 检索", run: (arg, o) => searchAniList(arg, o) },
+  "mal.anime": { provider: "myanimelist", label: "MyAnimeList anime（需 client id）", run: (arg, o) => fetchMyAnimeList(arg, o) },
+  "mal.search": { provider: "myanimelist", label: "MyAnimeList 检索（需 client id）", run: (arg, o) => searchMyAnimeList(arg, o) },
+  "isni.record": { provider: "isni", label: "ISNI 记录（访问状态见日期快照）", run: (arg, o) => fetchIsniRecord(arg, o) },
+  "viaf.record": { provider: "viaf", label: "VIAF 记录（访问状态见日期快照）", run: (arg, o) => fetchViafRecord(arg, o) },
+  "oclc.fast": { provider: "oclc", label: "OCLC FAST（需凭据 / 已变更）", run: (arg, o) => fetchOclcFastHeading(arg, o) },
+  "ndl.authority": { provider: "ndl", label: "NDL Linked Data 权威记录", run: (arg, o) => fetchNdlAuthority(arg, o) },
+  "vgmdb.album": { provider: "vgmdb", label: "VGMdb 专辑（直连；被拦时抛 blocked）", run: (arg, o) => fetchVgmdbAlbum(arg, o) },
+  "vgmdb.archive": { provider: "vgmdb", label: "VGMdb 专辑（经 Internet Archive 存档）", run: (arg, o) => fetchVgmdbAlbumViaArchive(arg, o) },
+  "itunes.search": { provider: "itunes", label: "iTunes Store 专辑检索（可带 country=xx，默认 jp）", run: (arg, o) => searchItunes(arg, o) },
+  "itunes.album": { provider: "itunes", label: "iTunes Store 专辑 + 曲目（数字 collectionId 或专辑链接）", run: (arg, o) => lookupItunesAlbum(arg, o) },
+  "steam.app": { provider: "steam", label: "Steam 应用资料（AppID 或商店/steamdb 链接；可带 langs=/cc=）", run: (arg, o) => fetchSteamApp(arg, o) },
+  "steam.search": { provider: "steam", label: "Steam 商店检索（可带 lang=/cc=）", run: (arg, o) => searchSteam(arg, o) },
+  "caa.release": { provider: "coverartarchive", label: "Cover Art Archive 发行版封面图组（release MBID 或链接）", run: (arg, o) => fetchCoverArtArchive(arg, Object.assign({ kind: "release" }, o)) },
+  "caa.release-group": { provider: "coverartarchive", label: "Cover Art Archive 发行组封面图组（release-group MBID 或链接；图属选定发行版）", run: (arg, o) => fetchCoverArtArchive(arg, Object.assign({ kind: "release-group" }, o)) },
+  "kitsu.anime": { provider: "kitsu", label: "Kitsu 动画条目（数字 id / slug / kitsu.io/anime/… 链接）", run: (arg, o) => fetchKitsuMedia(arg, Object.assign({ kind: "anime" }, o)) },
+  "kitsu.manga": { provider: "kitsu", label: "Kitsu 漫画条目（数字 id / slug / kitsu.io/manga/… 链接）", run: (arg, o) => fetchKitsuMedia(arg, Object.assign({ kind: "manga" }, o)) },
+  "kitsu.search": { provider: "kitsu", label: "Kitsu 检索（默认 anime；kind=manga 换层级）", run: (arg, o) => searchKitsu(arg, o) },
+  "vndb.vn": { provider: "vndb", label: "VNDB 作品条目（v<数字> / 裸数字 / vndb.org/v<数字> 链接）", run: (arg, o) => fetchVndbVn(arg, o) },
+  "vndb.releases": { provider: "vndb", label: "VNDB 某作品下的版次（品番 / 条码 / 载体枚数 / 发行方与开发方分工）", run: (arg, o) => fetchVndbReleases(arg, o) },
+  "vndb.character": { provider: "vndb", label: "VNDB 角色条目（c<数字>）", run: (arg, o) => fetchVndbCharacter(arg, o) },
+  "vndb.staff": { provider: "vndb", label: "VNDB 职员条目（s<数字>）", run: (arg, o) => fetchVndbStaff(arg, o) },
+  "vndb.schema": { provider: "vndb", label: "VNDB API 权威字段名与枚举（fields/filters 报错时查这个，不用试错）", run: (arg, o) => fetchVndbSchema(arg, o) },
+  "openbd.isbn": { provider: "openbd", label: "OpenBD 日本出版物书目（ISBN-13 / ISBN-10）", run: (arg, o) => lookupOpenbdByIsbn(arg, o) },
+  "gutenberg.ebook": { provider: "gutenberg", label: "Project Gutenberg 电子书书目（数字 id 或 /ebooks/<id> 链接，读 RDF）", run: (arg, o) => fetchGutenbergEbook(arg, o) },
+  "gutenberg.search": { provider: "gutenberg", label: "Project Gutenberg 检索（候选须逐条核对署名）", run: (arg, o) => searchGutenberg(arg, o) },
 };
 
 /** CLI / smoke 统一分发：未知 op 抛 bad_input，不静默返回空。 */

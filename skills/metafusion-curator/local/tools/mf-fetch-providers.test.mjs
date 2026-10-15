@@ -169,8 +169,8 @@ test("fetchDiscogsRelease maps fixture into the shared shape", async () => {
   assert.equal(out.title, "Discovery");
   assert.equal(out.dates.release, "2001-03-12");
   assert.equal(out.dates.released_formatted, "12 Mar 2001");
-  assert.equal(out.external_links.catalog_number, "V2940");
-  assert.equal(out.external_links.barcode, "7 24384 96061 2");
+  assert.equal(out.external_ids.catalog_number, "V2940");
+  assert.equal(out.external_ids.barcode, "7 24384 96061 2");
   assert.equal(out.image_url, readJson("discogs-release-with-image.json").images[0].uri);
   assert.ok(out.tracks.length > 5);
   assert.equal(out.tracks[0].title, "One More Time");
@@ -243,7 +243,7 @@ test("lookupOpenLibraryByIsbn uses search index (not the dead /isbn path)", asyn
   const fetchImpl = stubFetch([{ match: "search.json?q=isbn%3A9780156035231", body: readJson("openlibrary-search-isbn.json") }]);
   const out = await lookupOpenLibraryByIsbn("978-0-15-603523-1", { fetchImpl });
   assert.equal(out.found, true);
-  assert.deepEqual(out.external_links.isbn, ["9780156035231"]);
+  assert.deepEqual(out.external_ids.isbn, ["9780156035231"]);
   assert.equal(fetchImpl.calls[0].url.indexOf("/isbn/"), -1);
 });
 
@@ -251,9 +251,9 @@ test("lookupOpenLibraryAuthor surfaces ISNI/VIAF as cross-check hints", async ()
   const fetchImpl = stubFetch([{ match: "authors/OL76088A.json", body: readJson("openlibrary-author-OL76088A.json") }]);
   const out = await lookupOpenLibraryAuthor("OL76088A", { fetchImpl });
   assert.equal(out.title, "Rozanne Gold");
-  assert.equal(out.external_links.isni, "0000000110483251");
-  assert.equal(isValidIsni(out.external_links.isni), true);
-  assert.equal(out.external_links.viaf, "28224202");
+  assert.equal(out.external_ids.isni, "0000000110483251");
+  assert.equal(isValidIsni(out.external_ids.isni), true);
+  assert.equal(out.external_ids.viaf, "28224202");
   assert.equal(out.dates.birth, "1954");
   assert.match(out.notes, /二重核对/);
 });
@@ -267,7 +267,7 @@ test("fetchArchiveItem maps metadata fixture", async () => {
   assert.equal(out.id, "hot-buttered-rum-internet-archive-2022");
   assert.match(out.title, /Hot Buttered Rum/);
   assert.equal(out.image_url, "https://archive.org/services/img/hot-buttered-rum-internet-archive-2022");
-  assert.equal(out.external_links.mediatype, "movies");
+  assert.equal(out.external_ids.mediatype, "movies");
   assert.match(out.notes, /用户上传件不等于官方来源/);
 });
 
@@ -317,7 +317,7 @@ test("fetchTmdbMedia with v3 key sends api_key and maps fixture", async () => {
   assert.equal(out.titles.original, "Fight Club");
   assert.equal(out.dates.release, "1999-10-15");
   assert.equal(out.image_url, "https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg");
-  assert.equal(out.external_links.imdb, "tt0137523");
+  assert.equal(out.external_ids.imdb, "tt0137523");
   assert.match(out.notes, /时长=139min/);
 });
 
@@ -438,7 +438,7 @@ test("fetchIsniRecord parses a matching RDF record and returns an explicit 404 m
   assert.equal(out.found, true);
   assert.equal(out.id, "0000000121389471");
   assert.equal(out.title, "Daft Punk");
-  assert.deepEqual(out.external_links, { isni: "0000000121389471" });
+  assert.deepEqual(out.external_ids, { isni: "0000000121389471" });
 
   const miss = await fetchIsniRecord("0000 0001 2138 9471", {
     fetchImpl: stubFetch([{ match: "isni.org/isni/", status: 404, body: "Not Found" }]),
@@ -470,7 +470,7 @@ test("fetchViafRecord parses only a matching known JSON record shape", async () 
   assert.equal(out.found, true);
   assert.equal(out.id, "59163545");
   assert.equal(out.title, "Turing, Alan, 1912-1954");
-  assert.deepEqual(out.external_links, { viaf: "59163545" });
+  assert.deepEqual(out.external_ids, { viaf: "59163545" });
 
   const miss = await fetchViafRecord("59163545", {
     fetchImpl: stubFetch([{ match: "viaf.org/viaf/", status: 404, body: "Not Found" }]),
@@ -516,7 +516,7 @@ test("fetchNdlAuthority maps the JSON-LD authority record", async () => {
   assert.equal(out.dates.birth, "1938");
   assert.match(out.notes, /type=Person/);
   assert.match(out.notes, /inScheme=personalNames/);
-  assert.ok(out.external_links.viaf.length === 1 && /viaf/i.test(String(out.external_links.viaf[0])));
+  assert.ok(out.external_ids.viaf.length === 1 && /viaf/i.test(String(out.external_ids.viaf[0])));
 });
 
 test("fetchNdlAuthority 404 maps to found:false with guidance", async () => {
@@ -535,7 +535,7 @@ test("parseVgmdbAlbumHtml reads the real archived album page", () => {
   assert.equal(out.image_url, "https://medium-media.vgm.io/albums/94/111949/111949-32052d212c19.png");
   assert.equal(out.dates.release, "2020-12-23");
   assert.equal(out.dates.release_raw, "Dec 23, 2020");
-  assert.equal(out.external_links.catalog_number, null, "N/A 不能当作品番");
+  assert.equal(out.external_ids.catalog_number, null, "N/A 不能当作品番");
   assert.match(out.notes, /发行形式=Doujin\/Indie/);
   assert.match(out.notes, /出版=\+TEK/);
   assert.ok(out.tracks.length >= 10, "曲目应解析出来");
@@ -703,8 +703,8 @@ test("lookupItunesAlbum maps the collection plus the track list", async () => {
   assert.equal(out.title, "AQUAPLUS VOCAL COLLECTION VOL.1");
   assert.equal(out.dates.release, "2006-01-01");
   assert.equal(out.dates.release_raw, "2006-01-01T00:00:00Z");
-  assert.equal(out.external_links.itunes, "541874266");
-  assert.equal(out.external_links.barcode_candidate, null, "封面文件名非条码时不给候选编号");
+  assert.equal(out.external_ids.itunes, "541874266");
+  assert.equal(out.external_ids.barcode_candidate, null, "封面文件名非条码时不给候选编号");
   assert.match(out.images["600"], /\/600x600bb\.jpg$/);
   assert.equal(out.release_number, null);
   assert.match(out.notes, /未含可识别编号/);
@@ -750,8 +750,8 @@ test("lookupItunesAlbum surfaces the artwork-filename barcode as an explicit can
   const out = await lookupItunesAlbum("1591536789", { fetchImpl });
   assert.equal(out.found, true);
   assert.deepEqual(out.release_number, { value: "4547366532999", source: "apple_artwork_filename", scheme: "ean-13", checksum_valid: true, kind: "candidate" });
-  assert.equal(out.external_links.barcode_candidate, "4547366532999");
-  assert.equal(out.external_links.upc, null, "Apple Search API 不返回 upc，保持 null");
+  assert.equal(out.external_ids.barcode_candidate, "4547366532999");
+  assert.equal(out.external_ids.upc, null, "Apple Search API 不返回 upc，保持 null");
   assert.match(out.notes, /编号候选 4547366532999/);
   assert.match(out.notes, /校验位通过/);
   assert.match(out.notes, /须由 agent 按技能核实确认/);
@@ -826,7 +826,7 @@ test("fetchSteamApp maps multi-language appdetails into the shared shape", async
   assert.equal(out.dates.release, "2018-01-25");
   assert.equal(out.dates.release_raw, "Jan 25, 2018");
   assert.equal(out.dates.by_lang.schinese.normalized, "2018-01-25");
-  assert.deepEqual(out.external_links, { steam: "504230" });
+  assert.deepEqual(out.external_ids, { steam: "504230" });
   assert.equal(out.human_page, "https://store.steampowered.com/app/504230/");
   assert.equal(out.url, fetchImpl.calls[0].url);
   assert.deepEqual(out.developers, ["Maddy Makes Games Inc.", "Extremely OK Games, Ltd."]);
@@ -1010,9 +1010,9 @@ test("fetchDiscogsRelease tolerates releases without images", async () => {
   const out = await fetchDiscogsRelease("1137851", { fetchImpl });
   assert.equal(out.found, true);
   assert.equal(out.dates.year, "1995");
-  assert.equal(out.external_links.discogs, "1137851");
+  assert.equal(out.external_ids.discogs, "1137851");
   assert.ok(out.image_url === null || /^https:\/\//.test(out.image_url), "无图时必须是 null，不能是空串");
-  assert.equal(out.external_links.catalog_number, "SHADOW 72");
+  assert.equal(out.external_ids.catalog_number, "SHADOW 72");
 });
 
 test("fetchDiscogsMaster maps master fixture and keeps master id", async () => {
@@ -1020,7 +1020,7 @@ test("fetchDiscogsMaster maps master fixture and keeps master id", async () => {
   const out = await fetchDiscogsMaster("https://www.discogs.com/master/121181-Duran-Duran", { fetchImpl });
   assert.equal(fetchImpl.calls[0].url, "https://api.discogs.com/masters/121181");
   assert.equal(out.id, "121181");
-  assert.equal(out.external_links.master, "121181");
+  assert.equal(out.external_ids.master, "121181");
   assert.equal(out.title, "Red Carpet Massacre");
   assert.deepEqual(out.titles.artists, ["Duran Duran"]);
   assert.equal(out.dates.year, "2007");
@@ -1108,7 +1108,7 @@ test("openbd.isbn maps the real ONIX record and keeps series number away from vo
   assert.equal(out.dates.publish_raw, "201612");
   assert.deepEqual(out.authors, ["師走,トオル"]);
   assert.deepEqual(out.isbn_checksum, { scheme: "isbn-13", valid: true });
-  assert.deepEqual(out.external_links, { openbd: "9784048923514" });
+  assert.deepEqual(out.external_ids, { openbd: "9784048923514" });
   // summary.volume=3159 是電撃文庫的丛书序号，不是巻号（巻号 10 只在题名里）。
   assert.equal(out.collection_part_number, "3159");
   assert.equal(out.volume, undefined, "不能再暴露一个叫 volume 的字段：那是丛书序号，会被当巻号写进站内");
@@ -1242,7 +1242,7 @@ test("kitsu normalizes locale keys, keeps romaji out of translations, and expose
   assert.equal(out.episode_count, 28);
   assert.equal(out.subtype, "TV");
   assert.equal(out.age_rating, "PG");
-  assert.deepEqual(out.external_links, { kitsu: "46474" });
+  assert.deepEqual(out.external_ids, { kitsu: "46474" });
   assert.equal(out.human_page, "https://kitsu.io/anime/sousou-no-frieren");
   assert.equal(out.url, fetchImpl.calls[0].url);
   // 尺寸随 URL 一起给出：判封面门槛不必真的打开图片。
@@ -1333,7 +1333,7 @@ test("vndb.vn maps the real record including the Chinese title variants", async 
   assert.equal(out.titles["zh-Hant"].title, "時光的羈絆");
   assert.equal(out.titles.ja.main, true);
   assert.equal(out.dates.release, "2002-08-29");
-  assert.deepEqual(out.external_links, { vndb: "v17" });
+  assert.deepEqual(out.external_ids, { vndb: "v17" });
   assert.ok(out.languages.includes("zh-Hans"));
   assert.match(out.description_text, /LeMU/);
   assert.ok(!out.description_text.includes("[url="), "纯文本里不应残留 BBCode");
@@ -1376,7 +1376,7 @@ test("vndb.character and vndb.staff keep transcription apart from the original s
   assert.equal(c.found, true);
   assert.equal(c.title, "Tortinita Fine");
   assert.equal(c.original_name, "トルティニタ・フィーネ");
-  assert.deepEqual(c.external_links, { vndb_character: "c17" });
+  assert.deepEqual(c.external_ids, { vndb_character: "c17" });
   assert.deepEqual(c.image_meta.dims, [256, 300], "短边 256 低于站内 300 门槛，dims 必须给出以便先量再写");
   assert.equal(c.appears_in[0].title, "Symphonic Rain");
   assert.equal(c.appears_in[0].role, "primary");
@@ -1387,7 +1387,7 @@ test("vndb.character and vndb.staff keep transcription apart from the original s
   const s = await fetchVndbStaff("s17", { fetchImpl: st });
   assert.equal(s.found, true);
   assert.equal(s.title, "Ueda Kana");
-  assert.deepEqual(s.external_links, { vndb_staff: "s17" });
+  assert.deepEqual(s.external_ids, { vndb_staff: "s17" });
   assert.ok(Array.isArray(s.aliases));
   assert.match(s.notes, /没有生日字段/);
 });
@@ -1503,7 +1503,7 @@ test("gutenberg.ebook warns about the crossed RDFa attributes on the HTML page",
   assert.equal(out.found, true);
   assert.equal(out.title, "Romeo and Juliet");
   assert.equal(out.dates.release, "1998-11-01");
-  assert.deepEqual(out.external_links, { gutenberg: "1513" });
+  assert.deepEqual(out.external_ids, { gutenberg: "1513" });
   assert.equal(out.human_page, "https://www.gutenberg.org/ebooks/1513");
   assert.equal(out.url, fetchImpl.calls[0].url);
   assert.equal(out.publisher, "Project Gutenberg");

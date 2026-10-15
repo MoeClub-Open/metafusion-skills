@@ -16,7 +16,7 @@
 - [ ] 关系启用、两端 kind/方向/作用域正确；角色等 attributes 区分事实，position 不制造新事实，反向展示不重复建边。
 - [ ] 组成与循环/唯一位置按当前 usage、scope、reference_scopes、cycle_group 检查；局部检查不声称全库无环。
 - [ ] 核心字段与身份锚点按 [来源策略](reference-source-policy.md) 映射到当前证据；citation 明确支持字段。
-- [ ] 核实官网时 `external_links.official_website` 写完整官方 URL，不能只留 sources。
+- [ ] 核实官网时 `external_links` 中 `kind="official_website"` 的 `url` 写完整官方 URL，不能只留 sources。
 - [ ] 图片匹配具体版次，数组顺序保留手选封面；自托管资产绑定已回读。图像授权与权利材料分别判断。
 
 ## 写后回读

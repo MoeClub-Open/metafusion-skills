@@ -60,7 +60,7 @@ function validateInput({
 
   const titleValues = [...titles].map(cleanText).filter(Boolean);
   const externalValues = [...externalIds].map((item) => ({
-    provider: cleanText(item?.provider),
+    provider: cleanText(item?.kind ?? item?.provider),
     value: cleanText(item?.value),
   }));
   const attributeValues = [...attributes].map((item) => ({
