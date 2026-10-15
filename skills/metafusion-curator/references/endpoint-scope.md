@@ -31,7 +31,7 @@
 同属目录服务、但不写实体的几条通道，先认准再调用：
 
 - `GET /api/exchange/entities/{id}`：导出该实体的快照，只读，匿名可访问。
-- `POST /api/exchange/proposals`：提交外部提案，落 `pending_review` 待审，**不直接写实体**。
+- 外部编辑统一使用 `POST /api/catalog/commits`；待审回执不改当前实体。
 - `GET /api/catalog/me/home-preferences`：读调用者自己的主页偏好，与实体无关。
 - `GET /api/docs`（Scalar）、`GET /api/swagger`（Swagger UI）：目录服务托管的交互式文档页，属**管理面**
   （需登录 + `catalog.lifecycle.manage`，页面与自托管资源同一道闸门），不是给接入方看的公开入口；
