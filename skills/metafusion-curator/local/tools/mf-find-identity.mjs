@@ -154,6 +154,27 @@ function matchReasons(entity, query) {
   }
 
   for (const criterion of query.externalIds) {
+    const links = Array.isArray(entity.external_links)
+      ? entity.external_links
+      : [];
+    const hit = links.find(
+      (link) =>
+        link?.kind === criterion.provider &&
+        (link?.external_id === criterion.value ||
+          link?.url === criterion.value),
+    );
+    if (hit) {
+      addReason(reasons, {
+        query_mode: "external_id_exact",
+        provider: criterion.provider,
+        query_value: criterion.value,
+        matched_field: "external_links." + criterion.provider,
+        matched_value: criterion.value,
+        match_method: "exact_value",
+        strength: "identifier_candidate",
+      });
+      continue;
+    }
     const actual = entity.external_ids?.[criterion.provider];
     if (typeof actual === "string" && actual === criterion.value) {
       addReason(reasons, {
@@ -231,6 +252,9 @@ function candidateEntity(entity) {
       entity.external_ids && typeof entity.external_ids === "object"
         ? entity.external_ids
         : {},
+    external_links: Array.isArray(entity.external_links)
+      ? entity.external_links
+      : [],
   };
 }
 
@@ -308,7 +332,10 @@ export async function findIdentity({
       body: {
         kind: query.kind,
         titles: query.titles,
-        external_ids: query.externalIds,
+        external_links: query.externalIds.map((item) => ({
+          kind: item.provider,
+          value: item.value,
+        })),
         attributes: query.attributes,
         ...(query.workId ? { work_id: query.workId } : {}),
         ...(query.releaseId ? { release_id: query.releaseId } : {}),

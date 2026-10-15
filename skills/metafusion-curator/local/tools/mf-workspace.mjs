@@ -114,6 +114,7 @@ function validateReview(ids, allowLocal = false) {
     throw new Error("invalid_identity_review");
   return ids;
 }
+const SOURCE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 function evidenceEligible(evidence, origin, blockedHosts = []) {
   const blocked = new Set(["findverse.cc"]);
   for (const value of [origin, process.env.MF_API_ORIGIN, process.env.MF_BASE, ...blockedHosts]) {
@@ -121,11 +122,18 @@ function evidenceEligible(evidence, origin, blockedHosts = []) {
     try { blocked.add(new URL(value.includes("://") ? value : `https://${value}`).hostname.toLowerCase().replace(/\.$/, "")); }
     catch { throw new Error("invalid_blocked_host"); }
   }
+  const keys = new Set();
   for (const source of evidence) {
     if (source?.kind === "self") throw new Error("source_not_eligible");
     if (!record(source) || !["url", "publication"].includes(source.kind) ||
         typeof source.citation !== "string" || !source.citation.trim())
       throw new Error("invalid_source");
+    if (source.key !== undefined) {
+      if (typeof source.key !== "string" || !SOURCE_KEY_PATTERN.test(source.key))
+        throw new Error("invalid_source_key");
+      if (keys.has(source.key)) throw new Error("duplicate_source_key");
+      keys.add(source.key);
+    }
     if (source.kind === "url" || (source.url !== undefined && source.url !== "")) {
       let url;
       try { url = new URL(source.url); } catch { throw new Error("invalid_source"); }
@@ -136,6 +144,31 @@ function evidenceEligible(evidence, origin, blockedHosts = []) {
         throw new Error("source_not_eligible");
     }
   }
+}
+function withSourceKeys(evidence) {
+  const used = new Set();
+  for (const source of evidence)
+    if (source.key !== undefined) used.add(source.key);
+  let counter = 0;
+  return evidence.map((source) => {
+    if (source.key !== undefined) return source;
+    let key;
+    do {
+      counter += 1;
+      key = `src${counter}`;
+    } while (used.has(key));
+    used.add(key);
+    return { ...source, key };
+  });
+}
+function withOperationSourceRefs(operations, evidence) {
+  const keys = evidence.map((source) => source.key);
+  if (!keys.length || keys.some((key) => typeof key !== "string" || !key))
+    throw new Error("source_key_required");
+  return operations.map((op) => {
+    if (Array.isArray(op.source_refs) && op.source_refs.length) return op;
+    return { ...op, source_refs: keys.map((key) => ({ source: key })) };
+  });
 }
 function parts(pointer) {
   return pointer
@@ -502,12 +535,14 @@ export async function runWorkspace(
       if (!editNote?.trim() || !Array.isArray(evidence) || !evidence.length)
         throw new Error("commit_evidence_required");
       evidenceEligible(evidence, origin, blockedHosts);
+      const keyedSources = withSourceKeys(evidence);
+      const mappedOperations = withOperationSourceRefs(operations, keyedSources);
       const request = {
         id: randomUUID(),
         definitions_etag: state.definitions_etag,
         edit_note: editNote,
-        sources: evidence,
-        operations,
+        sources: keyedSources,
+        operations: mappedOperations,
       };
       save(
         safeFile(root, `.mf/commits/${request.id}.json`),

@@ -36,6 +36,32 @@ export const KINDS = [
 /** 来源/证据构造（与 reference-source-policy.md 一致）。 */
 export const src = (url, citation) => ({ kind: "url", url, citation });
 export const selfEvidence = (citation) => ({ kind: "self", citation });
+const SOURCE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+export function withCommitSourceRefs(sources) {
+  if (!Array.isArray(sources) || !sources.length)
+    throw new Error("commit_evidence_required");
+  const used = new Set();
+  for (const source of sources) {
+    if (source?.key === undefined) continue;
+    if (typeof source.key !== "string" || !SOURCE_KEY_PATTERN.test(source.key))
+      throw new Error("invalid_source_key");
+    if (used.has(source.key)) throw new Error("duplicate_source_key");
+    used.add(source.key);
+  }
+  let counter = 0;
+  const keyed = sources.map((source) => {
+    if (source?.key !== undefined) return source;
+    let key;
+    do {
+      counter += 1;
+      key = `src${counter}`;
+    } while (used.has(key));
+    used.add(key);
+    return { ...source, key };
+  });
+  const refs = keyed.map((source) => ({ source: source.key }));
+  return { sources: keyed, refs };
+}
 
 /** 读取单个实体；404 返回 null，其它非 200 一律抛错。 */
 export async function getEntity(id) {
@@ -456,11 +482,18 @@ export async function mergeEntity({
       const defs = await request("/api/catalog/definitions");
       if (defs.status !== 200 || !defs.body?.etag)
         return result(false, "definitions_unavailable");
+      let keyedSources = sources,
+        sourceRefs = [];
+      try {
+        ({ sources: keyedSources, refs: sourceRefs } = withCommitSourceRefs(sources));
+      } catch {
+        return result(false, "evidence_required: 提交来源缺少可用的 key 映射");
+      }
       const commit = {
         id: randomUUID(),
         definitions_etag: defs.body.etag,
         edit_note: baseNote,
-        sources,
+        sources: keyedSources,
         operations: [
           {
             target: "entity",
@@ -468,6 +501,7 @@ export async function mergeEntity({
             id: keep.id,
             base_version: currentKeep.version,
             patch,
+            source_refs: sourceRefs,
             ...(identityReview !== undefined ? { reviewed_candidate_ids: identityReview } : {}),
           },
         ],

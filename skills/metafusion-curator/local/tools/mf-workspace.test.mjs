@@ -637,6 +637,48 @@ test("creation receipt adopts server identity while preserving later edits", asy
   assert.equal(f.read("entities/new-new_work.json").version, 1);
 });
 
+test("commit seals source keys and maps every operation to source_refs", async (t) => {
+  const f = fixture(t),
+    local = await f.seal();
+  const sealed = f.read(`.mf/commits/${local.commit_id}.json`).request;
+  assert.deepEqual(sealed.sources, [{ ...evidence[0], key: "src1" }]);
+  assert.deepEqual(sealed.operations[0].source_refs, [{ source: "src1" }]);
+  const multi = fixture(t);
+  await runWorkspace("init", multi.opts);
+  await runWorkspace("checkout", { ...multi.opts, entityIDs: [multi.id] });
+  multi.edit({ title: "mine" });
+  const keyed = await runWorkspace("commit", {
+    ...multi.opts,
+    note: "keyed",
+    sources: [
+      { kind: "url", citation: "first", url: "https://source.test/a", key: "official" },
+      { kind: "url", citation: "second", url: "https://source.test/b" },
+    ],
+    reviews: { [`entity:${multi.id}`]: [] },
+  });
+  const keyedSealed = multi.read(`.mf/commits/${keyed.commit_id}.json`).request;
+  assert.deepEqual(keyedSealed.sources.map((s) => s.key), ["official", "src1"]);
+  assert.deepEqual(keyedSealed.operations[0].source_refs, [{ source: "official" }, { source: "src1" }]);
+  for (const bad of [
+    [{ ...evidence[0], key: "1bad" }],
+    [{ ...evidence[0], key: "dup" }, { ...evidence[0], key: "dup" }],
+  ]) {
+    const g = fixture(t);
+    await assert.rejects(g.seal({ sources: bad }), /invalid_source_key|duplicate_source_key/);
+  }
+  const rebaseFixture = fixture(t),
+    first = await rebaseFixture.seal();
+  rebaseFixture.docs.set(rebaseFixture.id, { ...rebaseFixture.docs.get(rebaseFixture.id), title: "theirs", version: 2 });
+  await runWorkspace("push", { ...rebaseFixture.opts, apply: true, requestFn: async (p, o) => p.endsWith("/commits")
+    ? { status: 409, body: { error: "commit_conflict" } } : rebaseFixture.fn(p, o) });
+  const rebased = await runWorkspace("rebase", { ...rebaseFixture.opts,
+    resolutions: { [`entity:${rebaseFixture.id}`]: { "/title": "ours" } } });
+  const rebasedSealed = rebaseFixture.read(`.mf/commits/${rebased.commit_id}.json`).request;
+  assert.deepEqual(rebasedSealed.sources, [{ ...evidence[0], key: "src1" }]);
+  assert.deepEqual(rebasedSealed.operations[0].source_refs, [{ source: "src1" }]);
+  assert.notEqual(rebased.commit_id, first.commit_id);
+});
+
 test("unknown dynamic paths remain in the sealed patch and preview reports rejection", async (t) => {
   const f = fixture(t);
   await runWorkspace("init", f.opts);
