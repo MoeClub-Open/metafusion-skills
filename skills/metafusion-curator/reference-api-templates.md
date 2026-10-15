@@ -112,7 +112,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         ],
         "translations": {
           "ja": {"title": "秒速5センチメートル"},
-          "zh-CN": {"title": "秒速5厘米", "summary": "作品级简介", "aliases": ["5cm/s"]},
+          "zh-CN": {"title": "秒速5厘米", "summary": "作品级简介", "body": "## 创作背景\n根据外部资料撰写条目说明。[^official]\n\n[^official]: https://example.org/official", "aliases": ["5cm/s"]},
           "en-US": {"title": "5 Centimeters per Second", "summary": "English summary"}
         },
         "status": "draft"
