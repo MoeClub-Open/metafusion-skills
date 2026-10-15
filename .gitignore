@@ -22,3 +22,6 @@ __pycache__/
 /skills/metafusion-curator/tools/
 
 /node_modules/
+
+/skills/metafusion-curator/local/
+/out/
