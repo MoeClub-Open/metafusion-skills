@@ -361,6 +361,8 @@ export async function runWorkspace(
     target = "entity",
     ref,
     file,
+    language,
+    translationTitle,
     review,
     note,
     sources,
@@ -439,6 +441,26 @@ export async function runWorkspace(
         .filter((e) => e.patch === null || e.patch.length || e.ignored_omissions.length);
     if (command === "status")
       return { ok: true, pending: state.pending, changes: status() };
+    if (command === "article") {
+      if (state.pending) throw new Error("pending_commit");
+      if (!file || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(language || ""))
+        throw new Error("article_file_and_language_required");
+      if (entityIDs.length + (ref ? 1 : 0) !== 1) throw new Error("one_entity_or_ref_required");
+      const entry = state.entries.find((item) => item.target === "entity" && (ref ? item.ref === ref : item.id === entityIDs[0]));
+      if (!entry) throw new Error("entity_not_checked_out");
+      if (fs.statSync(file).size > 400000) throw new Error("article_too_long");
+      const body = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(file));
+      if (body.includes("\0")) throw new Error("invalid_article_body");
+      if (Array.from(body).length > 100000) throw new Error("article_too_long");
+      const document = read(fileFor(entry));
+      const translations = document.translations || {};
+      const previous = translations[language] || {};
+      const title = translationTitle ?? previous.title;
+      if (typeof title !== "string" || !title.trim()) throw new Error("translation_title_required");
+      document.translations = { ...translations, [language]: { ...previous, title, body } };
+      save(fileFor(entry), document);
+      return { ok: true, language, file: entry.file, code_points: Array.from(body).length, applied: false };
+    }
     if (command === "checkout") {
       if (state.pending)
         throw new Error("pending_commit_requires_receipt_or_rebase");
@@ -931,7 +953,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || command === "help") {
     console.log(
-      "mf-workspace init|checkout|create|status|commit|preview|push|receipt|rebase --dir DIR\ncheckout: --entity UUID / --relation UUID (repeatable)\ncreate: --target entity|relation --ref NAME --file document.json --review identity-review.json (entities)\ncommit: --note TEXT --sources sources.json [--reviews identity-reviews.json] [--remove entity:UUID:/path] (repeatable)\nMissing keys are preserved and reported as ignored_omissions; deletion requires --remove.\npush: --apply [--commit UUID]; preview/receipt: [--commit UUID]\nreceipt/rebase: [--resolutions resolutions.json]; rebase: [--reviews identity-reviews.json]\n--blocked-host HOST (repeatable): additional local evidence host blacklist",
+      "mf-workspace init|checkout|create|article|status|commit|preview|push|receipt|rebase --dir DIR\ncheckout: --entity UUID / --relation UUID (repeatable)\narticle: --entity UUID (or --ref NAME) --lang LOCALE --file article.md [--title TITLE] (local edit only)\ncreate: --target entity|relation --ref NAME --file document.json --review identity-review.json (entities)\ncommit: --note TEXT --sources sources.json [--reviews identity-reviews.json] [--remove entity:UUID:/path] (repeatable)\nMissing keys are preserved and reported as ignored_omissions; deletion requires --remove.\npush: --apply [--commit UUID]; preview/receipt: [--commit UUID]\nreceipt/rebase: [--resolutions resolutions.json]; rebase: [--reviews identity-reviews.json]\n--blocked-host HOST (repeatable): additional local evidence host blacklist",
     );
     return;
   }
@@ -962,6 +984,12 @@ export async function runCli(argv = process.argv.slice(2)) {
         break;
       case "--file":
         options.file = value;
+        break;
+      case "--lang":
+        options.language = value;
+        break;
+      case "--title":
+        options.translationTitle = value;
         break;
       case "--note":
         options.note = value;

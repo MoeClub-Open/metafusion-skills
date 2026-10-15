@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 全站数据质量审计（纯只读）：只发 GET；不创建/修改/删除任何实体。
 //
-// 产出（默认 docs-local/data-quality/gap-report.{json,md}，可用 MF_AUDIT_OUT 改）：
+// 产出（默认系统临时目录，可用 MF_AUDIT_OUT 指定任务目录）：
 //   缺封面 / 缺语种 / 结构断链（区分 missing·soft_deleted·merged·kind_mismatch）/
 //   Release.subjects 未覆盖 / 裸母体 Work / 孤儿子级 / 同作用域真重复组。
 //
@@ -9,14 +9,7 @@
 //
 // 口径：列表接口默认不含软删除实体；凡"被引用但不在可见集合里"的目标都逐条 GET 复核。
 // 分页 limit 上限 100（传 200 会 400 invalid_limit）。
-// 全站数据质量审计（纯只读）：只发 GET /api/catalog/entities 与 GET /api/catalog/entities/{id}。
-// 不创建/修改/删除任何实体，不发 POST/PUT/DELETE/lifecycle，不发关系写入。
-//
-// 产出：docs-local/data-quality/gap-report.json + gap-report.md
-// 用法：node scripts/data/expansion/data-quality-audit.mjs
-//
-// 口径：列表接口默认只返回未软删除实体；凡"引用了但不在可见集合里"的父级都必须逐条 GET 复核，
-// 区分 soft_deleted / merged / missing / kind_mismatch。limit 上限 100（200 -> 400 invalid_limit）。
+import { auditOutputDirectory } from "./mf-output.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { collectPages } from "../metafusion-api.mjs";
@@ -25,10 +18,10 @@ import { collectPages } from "../metafusion-api.mjs";
 import { call as mfCall, scopeKey as entityScopeKey } from "./mf-lib.mjs";
 
 const BASE = (process.env.MF_BASE || "").replace(/\/+$/, "") || "（由 metafusion-api 的 credentials.json 决定）";
-const OUT_DIR = process.env.MF_AUDIT_OUT || "docs-local/data-quality";
+const OUT_DIR = auditOutputDirectory();
 const KINDS = ["work", "content_unit", "expression", "release", "medium", "track", "agent", "collection"];
-// 可选：某批次"手工包母体"清单；文件不存在时按空处理（不因缺文件而报错）
-const KNOWN13_FILE = process.env.MF_KNOWN_PACKAGES || "docs-local/data-campaign/logs/hand-packages-audit.json";
+// 可选的任务清单；不读取技能安装目录中的历史批次产物。
+const KNOWN13_FILE = process.env.MF_KNOWN_PACKAGES || null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let detailGets = 0;
 
@@ -223,7 +216,7 @@ const relWork = new Set();
 for (const e of byKind.release) for (const s of (Array.isArray(e.subjects) ? e.subjects : [])) if (s && s.work_id) relWork.add(s.work_id);
 let known13 = [];
 try {
-  const a = JSON.parse(fs.readFileSync(KNOWN13_FILE, "utf8"));
+  const a = KNOWN13_FILE ? JSON.parse(fs.readFileSync(KNOWN13_FILE, "utf8")) : [];
   known13 = Array.isArray(a) ? a.map((x) => (x && (x.id || (x.work && x.work.id))) || null).filter(Boolean) : [];
 } catch (e3) {}
 const known13Set = new Set(known13);
@@ -386,7 +379,7 @@ L.push("");
 L.push("- 生成时间：" + report.generated_at);
 L.push("- 目标实例：" + BASE);
 L.push("- 口径：纯只读，只发 GET /api/catalog/entities（分页 limit=100）与 GET /api/catalog/entities/{id}（复核不可见父级）。coverage 仅代表当前调用者可见列表范围；未创建/修改/删除任何实体。");
-L.push("- 机读版：docs-local/data-quality/gap-report.json");
+L.push(`- 机读版：${OUT_DIR}/gap-report.json`);
 L.push("");
 L.push("## 0. 总量与分页核对");
 L.push("");

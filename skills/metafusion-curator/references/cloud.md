@@ -1,14 +1,16 @@
 # 云端平台操作
 
-连接实例的 `/mcp` Streamable HTTP 端点，通过 MetaFusion 登录，在 `/mcp/manage` 勾选该客户端所需权限。MCP 权限与账号现时权限取交集；admin 组免业务 RPM 限流，不绕过授权与数据约束。
+连接实例的 `/mcp` Streamable HTTP 端点，通过 MetaFusion 登录，在 OAuth 同意页勾选该客户端所需权限，在 `/developer?tab=mcp` 管理连接。MCP 权限与账号现时权限取交集；admin 组免业务 RPM 限流，不绕过授权与数据约束。
 
 信息获取仍由 Agent 自行决定。MCP 不运行检索计划、不选择外部来源、不根据任意网页文字自动编目。`sources` 与修改内容由 Agent 提供；文件工具只下载明确传入的 URL 或处理明确提供的内容。
+
+MCP 使用独立委托凭据，不占个人 API Key 额度；缩减权限不新建密钥。权限编辑按需打开，扩大权限须在客户端重新授权。
 
 ## 读取契约与操作
 
 - `metafusion_api_contract`：当前目录 OpenAPI；动态字段另读 `/api/catalog/definitions`。
 - `metafusion_reference`：读取技能与链接的 reference 文档，或 `source=docs, path=docs/api-storage.md` 等公开 API 手册；返回部署锁定的版本。
-- `metafusion_api_call`：按现有 HTTP API 传 method、path、query、body、headers；JSON、base64 和 multipart 均可，不需要客户端执行环境。包含搜索、实体、关系、定义、导入、通知、互动、文件及已授权的管理操作。
+- `metafusion_api_call`：按现有 HTTP API 传 method、path、query、body、headers；JSON、base64 和 multipart 均可，不需要客户端执行环境。包含搜索、实体、关系、定义、外部来源只读查询、通知、互动、文件及已授权的管理操作。
 - 原生状态码、冲突、Retry-After 和回执保留。API 查询分页按原契约继续；一次响应不意味着关系全集。
 
 ## 提交

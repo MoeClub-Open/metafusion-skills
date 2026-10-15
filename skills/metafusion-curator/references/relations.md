@@ -14,7 +14,7 @@
 - `soundtrack_of` 默认是 OST Work → 被配乐的 Work；`cover_of`/`translation_of` 默认连接 Expression。按来源与当前定义核方向，不以同名判断。
 - `pressing_of` 表示再版自，不表示收录；Track 收录用 contents，Release 声明 Work 用 subjects。
 - `store_bonus_for` 默认目标为店铺 Agent，不是发行；`credit_role` 表示署名职位，不能替代结构归属。
-- 默认关系若不能表达某轨编曲者、某盘指挥或篇目改编，按 [定义扩展](reference-model-gaps.md) 判断准确落点；不能为挂署名复制 Expression，或改挂 Work。
+- 默认关系若不能表达某轨编曲者、某盘指挥或篇目改编，按 [定义扩展](model-gaps.md) 判断准确落点；不能为挂署名复制 Expression，或改挂 Work。
 
 ## 关系属性字段
 
@@ -57,8 +57,8 @@ expression_composition 必须是 expression→expression、scope=work、acyclic=
 
 ## 写入与证据
 
-创建/更新/删除信封统一见 [关系载荷](reference-api-templates.md#关系)，不在本页重复。关系当前版本从 `GET /api/catalog/entities/{id}/relations` 返回项取，写后回读集合；删除同样需要 expected_version/edit_note/sources。
+创建/更新/删除信封统一见 [关系载荷](api-templates.md#关系)，不在本页重复。关系当前版本从 `GET /api/catalog/entities/{id}/relations` 返回项取，写后回读集合；删除同样需要 expected_version/edit_note/sources。
 
-关系接受证据不自动满足 CORE-P1。普通辅助关系可用 P2；用于作者、改编、系列归属或唯一身份锚点时，边与两端须按 [来源策略](reference-source-policy.md) 核核心证据。引用要求目标存在、kind 相符、可见且未 deleted/merged；公开条目不可引用 draft。
+关系接受证据不自动满足 CORE-P1。普通辅助关系可用 P2；用于作者、改编、系列归属或唯一身份锚点时，边与两端须按 [来源策略](source-policy.md) 核核心证据。引用要求目标存在、kind 相符、可见且未 deleted/merged；公开条目不可引用 draft。
 
-拒绝码与修复动作见 [API 错误码](reference-api-errors.md)。
+拒绝码与修复动作见 [API 错误码](api-errors.md)。

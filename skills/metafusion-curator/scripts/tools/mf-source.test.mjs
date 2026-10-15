@@ -38,7 +38,7 @@ test("list/help are static, do not invoke fetch, and keep runtime status separat
     assert.ok(!JSON.stringify(list).includes("网关已变更"));
     assert.ok(sourceHelp.operations.some(operation => operation.id === "openlibrary.search"));
     assert.ok(operationHelp.operation.example.startsWith("node mf-source.mjs run isni.record "));
-    assert.match(operationHelp.note, /skills\/metafusion-curator\/local\/tools 目录运行/);
+    assert.match(operationHelp.note, /skills\/metafusion-curator\/scripts\/tools 目录运行/);
 
     const oclc = list.sources.find(source => source.id === "oclc");
     assert.equal(oclc.access_requirement.type, "connector_uses_no_credentials");

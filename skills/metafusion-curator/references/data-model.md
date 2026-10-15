@@ -1,6 +1,6 @@
 # 实体与层级
 
-创作与发行分开；字段/关系以实例当前 definitions 为准。命名见 [LRM 规范](../lrm-catalog-standards/SKILL.md)，请求见 [API 载荷](reference-api-templates.md)。
+创作与发行分开；字段/关系以实例当前 definitions 为准。命名见 [LRM 规范](../../lrm-catalog-standards/SKILL.md)，请求见 [API 载荷](api-templates.md)。
 
 ## 八种实体
 
@@ -16,7 +16,7 @@ Release：具体发行，经 subjects 声明 Work
         └── contents[] → Expression（position、locator、sources）
 ```
 
-Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文件、哈希、对象键与下载地址属于 [存储服务](reference-file-upload.md)，不写入创作题名或目录属性。
+Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文件、哈希、对象键与下载地址属于 [存储服务](file-upload.md)，不写入创作题名或目录属性。
 
 ## 归属与收录
 
@@ -28,7 +28,7 @@ Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文�
 - Release.subjects 声明全部收录 Expression 所属 Work；遗漏会 `undeclared_release_subject`。role 取当前启用 release_role，(work_id,role) 不重复。
 - `track_work` 是 release_role 词项，不是 relation；仅启用时表示发行中作为曲目收录的 Work（可含已证实影音作品）。词项结构 names/enabled，不虚构 description/source/metadata；role 不能替代 Expression 收录。
 - subjects/medium 可为空而入库，但不等于收录完整。先写 subjects，再补 Track.contents；跨实体不原子，失败核已提交部分。
-- attributes 受当前 enabled/applicable_kinds 与词表约束，没有实体 types；细节见 [字段](reference-types-and-fields.md)。
+- attributes 受当前 enabled/applicable_kinds 与词表约束，没有实体 types；细节见 [字段](types-and-fields.md)。
 
 ## 条目正文
 
@@ -60,4 +60,4 @@ Work 唯一不代表 Expression 唯一；录音室、现场、伴奏、混音按
 
 电影本体与同名 OST 都可能是 Work；按内容、责任主体与来源区分，标签不单独判身份。仅重排/定位变化复用内容，真实章节拆合或内容修订再区分 ContentUnit/Expression。
 
-审查见 [质检清单](reference-qa-checklist.md)；来源与需要时的批次计数见 [来源策略](reference-source-policy.md)。
+审查见 [质检清单](qa-checklist.md)；来源与需要时的批次计数见 [来源策略](source-policy.md)。

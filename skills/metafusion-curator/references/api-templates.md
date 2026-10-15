@@ -4,7 +4,7 @@
 
 ## 请求头与证据
 
-实体与关系写入位于 `/api/catalog/*`，需要登录；定义管理、导入与文件操作的路径见[接口范围](reference-endpoint-scope.md)。凭据三选一（都放在同一个请求头里）：
+实体与关系写入位于 `/api/catalog/*`，需要登录；定义管理、导入与文件操作的路径见[接口范围](endpoint-scope.md)。凭据三选一（都放在同一个请求头里）：
 
     Authorization: Bearer <会话令牌 / OAuth 访问令牌 / PAT>
     # PAT 是 `mfp_` 前缀的长期机器凭据：跑脚本或 Agent 时用它，不要共用某个人的会话令牌；
@@ -23,11 +23,11 @@
 
 `sources[].kind` 只能是 `url` / `publication` / `self`；`citation` 必填并应明确列出所支持字段；带 `url` 时必须是可公开访问的 HTTP(S) 地址、不得含用户信息。缺 `edit_note` 或缺 `sources` 会被拒绝为 `evidence_required`——**这是服务端强制的载荷门，不代表证据权威或字段级合格**。
 
-`self` 只能记录没有新增外部断言的维护、清理或限制说明，不能支撑题名、简介、编号、关系、身份锚点或封面权利。公开可访问的作者/机构自述应按 `url` 或 `publication` 登记，并仍按[字段级来源策略](reference-source-policy.md)判断是否满足核心门槛。服务端通过也不等于 CORE-P1 已核实。
+`self` 只能记录没有新增外部断言的维护、清理或限制说明，不能支撑题名、简介、编号、关系、身份锚点或封面权利。公开可访问的作者/机构自述应按 `url` 或 `publication` 登记，并仍按[字段级来源策略](source-policy.md)判断是否满足核心门槛。服务端通过也不等于 CORE-P1 已核实。
 
 ## 变更集信封
 
-Agent 普通编辑使用 checkout 与 CatalogCommit，完整协议只维护在[公开提交文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md)，本地流程见[提交与恢复](reference-workflow.md)。操作携带 base_version、JSON Pointer patch；实体创建声明 reviewed_candidate_ids 与本批 ref。
+Agent 普通编辑使用 checkout 与 CatalogCommit，完整协议只维护在[公开提交文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md)，本地流程见[提交与恢复](workflow.md)。操作携带 base_version、JSON Pointer patch；实体创建声明 reviewed_candidate_ids 与本批 ref。
 
 **破坏性变更（无兼容模式）：** 每个 `sources[]` 必须有唯一 `key`；每个操作必须有非空 `source_refs`（`[{source:<key>, pointers?:[json-pointer]}]`）。缺 key → `source_key_required`；缺/空 `source_refs` → `400 {"error":"source_refs_required","applied":false,"operation":<从0起>}`；池中未被引用的来源 → `source_unused`。旧格式提交一律拒绝，客户端必须升级。本地 `mf-workspace commit` 会在缺省时自动补 `s1…` key 并把全部来源挂到每个操作；云端 MCP / 手写载荷必须自己写全。 本地默认映射要求所给来源确实支持每个操作；不同条目或字段使用不同证据时应拆分提交，不能把自动映射当作字段来源核验。
 
@@ -94,7 +94,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
 
 ## 动态属性字段
 
-当前 Entity 不包含 types；可写属性取当前 `document.fields` 中 `applicable_kinds` 包含本 kind 的字段。展示模板和自由标签不改变可写范围。字段白名单、词表与结构化字段只维护在 [字段适用层级与结构化字段](reference-types-and-fields.md)，本页只给载荷示例。
+当前 Entity 不包含 types；可写属性取当前 `document.fields` 中 `applicable_kinds` 包含本 kind 的字段。展示模板和自由标签不改变可写范围。字段白名单、词表与结构化字段只维护在 [字段适用层级与结构化字段](types-and-fields.md)，本页只给载荷示例。
 
 注意两点易错项：
 
@@ -156,7 +156,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
 - `external_links` 的键必须来自实例预设；作品/发行/主体的官方站点用 `official_website` 记**完整 URL**
   （前端"外部资料"面板据此渲染官网入口并排在首位），核到官网就不要让它留在空对象里。
 - `pictures[].url` 必须是绝对 HTTP(S) 地址：相对路径（如 `/assets/covers/x.webp`）会被拒绝为 `invalid_picture`。图片须匹配具体实体/发行版；当前任务的图片操作授权与版权/许可材料分开记录。明确的任务操作授权可在其范围内执行，但不等于权利已核实；权利材料未知时报告 `unknown`，不能写成 `passed`。计数条件按本次批次定义。
-- 图片可带 `version_label`（多语言）、`usage_period: {begin?, end?}`（至少一端非空）、`role`（启用的 `picture_role` 词表码）与 `asset_id`（存储资产 UUID）；使用时段不表示版权期限。数组首项是手动封面，`taken_at` 不决定排序。自托管图片先完成 `cover_image` 绑定，再写 `asset_id` 并回读，流程见[文件上传与绑定](reference-file-upload.md)。
+- 图片可带 `version_label`（多语言）、`usage_period: {begin?, end?}`（至少一端非空）、`role`（启用的 `picture_role` 词表码）与 `asset_id`（存储资产 UUID）；使用时段不表示版权期限。数组首项是手动封面，`taken_at` 不决定排序。自托管图片先完成 `cover_image` 绑定，再写 `asset_id` 并回读，流程见[文件上传与绑定](file-upload.md)。
 - **不要**提交顶层 `cover_aspect` / `cover_image_url`：它们不在写入 DTO 里，严格解析会直接 `400 invalid_payload`。
 
 ## content_unit
@@ -310,7 +310,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
   提交 `work_id` 会因为不在该 kind 的允许字段里被拒绝。
 - 同一 Track 内 `position` 唯一；同一 `expression_id` **且 locator 完全相同**才算重复收录。
   同一表达按不同时间段切片可以在同一 Track 多次出现（如混音轨引用 0–30s 与 60–90s）。
-- `locator` 按当前 definitions 的组字段校验；锚点与区间规则见 [定位字段](reference-types-and-fields.md#locator)，整轨收录允许空 locator。
+- `locator` 按当前 definitions 的组字段校验；锚点与区间规则见 [定位字段](types-and-fields.md#locator)，整轨收录允许空 locator。
 
 书籍场景的 locator 示例：
 
@@ -332,7 +332,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
       "sources": [{"kind": "url", "citation": "官方曲目表", "url": "https://example.org/disc"}]
     }
 
-expected_version 来自 Track。PUT `/api/catalog/tracks/{id}/contents/{position}` 使用相同信封，URL 为回读的旧位置，inclusion.position 可以重排。DELETE 同路径只提交 expected_version/edit_note/sources；不要省略请求体。写后回读 Track、occurrences 与修订，409 时回读并合并；不要根据不可见记录的猜测位置操作。不可见收录或旧 position 无法核实时停止该项操作并报告未知。Track contents 来源省略规则见[API 行为参考](reference-api-behavior.md)。
+expected_version 来自 Track。PUT `/api/catalog/tracks/{id}/contents/{position}` 使用相同信封，URL 为回读的旧位置，inclusion.position 可以重排。DELETE 同路径只提交 expected_version/edit_note/sources；不要省略请求体。写后回读 Track、occurrences 与修订，409 时回读并合并；不要根据不可见记录的猜测位置操作。不可见收录或旧 position 无法核实时停止该项操作并报告未知。Track contents 来源省略规则见[API 行为参考](api-behavior.md)。
 
 ### 单独修改状态（先核 OpenAPI 支持）
 
@@ -364,7 +364,7 @@ DTO 不含 `entity` 或 `contents`，服务端在事务内保留完整收录；`
 
 - 关系码与允许的两端 `source_kinds` / `target_kinds` 来自 `GET /api/catalog/definitions` 的 `document.relations`，
   只使用其中 `enabled` 的条目；关系码清单只从 `document.relations` 取。
-  方向、端点与属性及约束见 [关系规则](reference-relations.md)。
+  方向、端点与属性及约束见 [关系规则](relations.md)。
 - 更新用 `PUT /api/catalog/relations/{id}`；删除用 `DELETE /api/catalog/relations/{id}`，
   **必须带 body**（`expected_version` + `edit_note` + `sources`），不带版本 → 409，完全不带 body → 400。
 
@@ -375,7 +375,7 @@ DTO 不含 `entity` 或 `contents`，服务端在事务内保留完整收录；`
 - `/api/catalog/entities/{id}`（实体本体与 `version`）；
 - `/api/catalog/entities/{id}/relations`（关系与对端实体）；
 - `/api/catalog/entities/{id}/occurrences`（表达/内容单位的反向收录）；
-- `/api/catalog/entities/{id}/revisions`（核对本次修订与证据；快照及可见性限制见[API 行为参考](reference-api-behavior.md)）；
+- `/api/catalog/entities/{id}/revisions`（核对本次修订与证据；快照及可见性限制见[API 行为参考](api-behavior.md)）；
 - 实例支持时，`/api/catalog/expressions/{id}/composition` 与 `/api/catalog/releases/{id}/editions` 核对直接组成和显式版本组；不由 subjects 推测；
 - 实体对比用 `/api/catalog/compare?ids=<id1>,<id2>`，返回 `items[].entity` 与 `items[].children`；发行/载体的子项形状是 `{medium, tracks}`，其他 kind 的 `children` 为空。
 

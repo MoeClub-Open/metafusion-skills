@@ -10,7 +10,6 @@
 !tools/templates/list-price-field.json
 !tools/README.md
 !tools/README-providers.md
-!tools/README-publishers.md
 !tools/mf-*.mjs
 # 提供方连接器的离线单测样本（真实响应的切片；合成样本文件名含 .synthetic.）
 !tools/__fixtures__/

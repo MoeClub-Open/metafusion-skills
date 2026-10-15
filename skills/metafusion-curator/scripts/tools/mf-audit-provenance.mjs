@@ -5,12 +5,13 @@
 // 不猜标题、不改任何东西；判定只依据 revisions 最早一条的 edit_note 与题名特征。
 //
 // 用法：node mf-audit-provenance.mjs
-// 产出：docs-local/data-campaign/logs/provenance-audit.json（可用 MF_AUDIT_OUT 改目录）
+// 产出：系统临时目录中的 provenance-audit.json；MF_AUDIT_OUT 可指定任务目录
 
+import { auditOutputDirectory } from "./mf-output.mjs";
 import fs from "node:fs";
 import { KINDS, call, listKind, sleep } from "./mf-lib.mjs";
 
-const OUT_DIR = process.env.MF_AUDIT_OUT || "docs-local/data-campaign/logs";
+const OUT_DIR = auditOutputDirectory();
 const CONCURRENCY = Number(process.env.MF_CONCURRENCY || 20);
 if (!Number.isInteger(CONCURRENCY) || CONCURRENCY < 1 || CONCURRENCY > 100) throw new Error("MF_CONCURRENCY 必须为 1–100 整数");
 

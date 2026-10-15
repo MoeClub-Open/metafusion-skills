@@ -10,12 +10,12 @@ MetaFusion 目录数据技能；实现与部署见 [主仓库](https://github.co
 
 ## 使用
 
-复制完整技能目录到 Agent 的技能目录，保留相对路径。`metafusion-curator` 的 `local/tools/` 依赖上级 `local/metafusion-api.mjs`，不能只复制工具文件。`lrm-catalog-standards` 与 `metafusion-curator` 同级安装、保持同一修订；关系查询技能可独立安装。只复制版本库文件，不复制本机凭据或审计产物。
+复制完整技能目录到 Agent 的技能目录，保留相对路径。`metafusion-curator` 的 `scripts/tools/` 依赖上级 `scripts/metafusion-api.mjs`，不能只复制工具文件。`lrm-catalog-standards` 与 `metafusion-curator` 同级安装、保持同一修订；关系查询技能可独立安装。只复制版本库文件，不复制本机凭据或审计产物。
 
-编目工具使用 Node.js 18+（内置 fetch，无 npm 包依赖，建议使用受支持的 LTS）；关系查询使用 Python 3.7+ 标准库。可先离线运行 `node local/tools/mf-platform.mjs list` 或 `python scripts/query_relationships.py --help` 核安装，各命令在对应技能目录运行。
+编目工具使用 Node.js 18+（内置 fetch，无 npm 包依赖，建议使用受支持的 LTS）；关系查询使用 Python 3.7+ 标准库。可先离线运行 `node scripts/tools/mf-platform.mjs list` 或 `python scripts/query_relationships.py --help` 核安装，各命令在对应技能目录运行。
 
-- [工具与命令](skills/metafusion-curator/local/tools/README.md)
-- [来源支持与凭据](skills/metafusion-curator/local/tools/README-providers.md)
-- [API 载荷](skills/metafusion-curator/reference-api-templates.md) · [运行契约](skills/metafusion-curator/reference-api-behavior.md)
+- [工具与命令](skills/metafusion-curator/scripts/tools/README.md)
+- [来源支持与凭据](skills/metafusion-curator/scripts/tools/README-providers.md)
+- [API 载荷](skills/metafusion-curator/references/api-templates.md) · [运行契约](skills/metafusion-curator/references/api-behavior.md)
 
 命令参数维护在工具 `help/schema`；其余参考按技能入口选择，不重复维护码表。

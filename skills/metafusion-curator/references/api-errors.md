@@ -20,7 +20,7 @@
 
 | 错误码 | 含义 | 修复动作 |
 | --- | --- | --- |
-| `evidence_required` | 缺 `edit_note`，或 `sources` 为空 | 补具体修改说明 + 至少一条来源；这只是载荷门，仍须按[字段级来源策略](reference-source-policy.md)逐字段核验 P1 |
+| `evidence_required` | 缺 `edit_note`，或 `sources` 为空 | 补具体修改说明 + 至少一条来源；这只是载荷门，仍须按[字段级来源策略](source-policy.md)逐字段核验 P1 |
 | `source_refs_required` | 某个操作缺或空 `source_refs`（响应常带 `applied:false` 与 `operation` 索引） | 给该操作补 `source_refs:[{source:<sources[].key>, pointers?:[...]}]`；无兼容模式，旧格式会被拒绝 |
 | `source_key_required` / `invalid_source_key` / `duplicate_source_key` | 来源池缺 key、key 不合规或重复 | 每条 source 给唯一 `key`（`^[A-Za-z][A-Za-z0-9_-]{0,63}$`） |
 | `source_unused` / `unknown_source_ref` / `duplicate_source_ref` | 池中有未被引用的来源，或操作引用了不存在/重复的 key | 每个 key 至少被一个操作引用一次；删掉多余来源或补引用 |
@@ -62,7 +62,7 @@
 | 错误码 | 含义 | 修复动作 |
 | --- | --- | --- |
 | `parent_required` | `content_unit`/`expression` 缺 `work_id`、`medium` 缺 `release_id`、`track` 缺 `medium_id` | 补归属；归属是实体身份的一部分，不是可选字段 |
-| `invalid_structural_field: <码>` | 结构性字段放错 kind：`contents` 不在 track、`subjects` 不在 release、`expression` 带 `parent_id`、`release` 带 `work_id`、`track` 带 `work_id` | 按 kind 只保留允许的结构字段（见 [API 载荷模板](reference-api-templates.md)） |
+| `invalid_structural_field: <码>` | 结构性字段放错 kind：`contents` 不在 track、`subjects` 不在 release、`expression` 带 `parent_id`、`release` 带 `work_id`、`track` 带 `work_id` | 按 kind 只保留允许的结构字段（见 [API 载荷模板](api-templates.md)） |
 | `immutable_scope` | PUT 想改 `kind`/`work_id`/`release_id`/`medium_id` | 换归属要重建实体并走 lifecycle 合并/停用，不能改字段 |
 | `undeclared_release_subject` | Track 收录的表达所属 Work 没在该发行的 `subjects` 里声明 | 在该发行上补 `subjects`（`primary`/`compilation`/`supplement`）；多作品盒装是受支持能力 |
 | `duplicate_subject` | 同一 `(work_id, role)` 声明了两次 | 去重；`position` 不是身份 |
@@ -77,7 +77,7 @@
 
 | 错误码 | 含义 | 修复动作 |
 | --- | --- | --- |
-| `invalid_relation_type` | 关系码不存在或未启用 | 只用 `definitions.document.relations` 里 `enabled` 的码（种子快照见 [关系码、方向与属性](reference-relations.md)） |
+| `invalid_relation_type` | 关系码不存在或未启用 | 只用 `definitions.document.relations` 里 `enabled` 的码（种子快照见 [关系码、方向与属性](relations.md)） |
 | `invalid_endpoints` | 两端 kind 不符合该关系的 `source_kinds`/`target_kinds`（**自环也走这里**） | 按定义选两端；自环一律不支持 |
 | `relation_cycle` | acyclic 关系会在单码或共同 cycle_group 中成环 | 按来源修正方向；未声明共同组的跨码路径不自动检查 |
 | `duplicate_relation` | 普通同码/同端点/同属性关系重复；expression_composition 中相同部分也跨码判重 | 普通多边按真实 character/credit_role 等区分；组合不重复部分。只改 position 无效 |

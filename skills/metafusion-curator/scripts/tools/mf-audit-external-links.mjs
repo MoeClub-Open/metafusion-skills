@@ -9,7 +9,7 @@
 //   node mf-audit-external-links.mjs --provider musicbrainz [--limit N]
 //   node mf-audit-external-links.mjs --provider bangumi [--limit N]
 //
-// 产出：docs-local/data-quality/external-id-audit-<provider>.json
+// 产出：系统临时目录中的 external-id-audit-<provider>.json；MF_AUDIT_OUT 可指定任务目录
 //
 // 口径（踩过坑，务必保留）：
 //   · **必须先穷举提供方的实体类型**。musicbrainz 的歌曲是 recording、公司是 label；
@@ -18,6 +18,7 @@
 //     括号后缀、中外文别名），否则会把对的判成错的。
 //   · **404 才算目标不存在**；429/网络失败属"未知"，不得当作失效。
 
+import { auditOutputDirectory } from "./mf-output.mjs";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { KINDS, listKind, sleep } from "./mf-lib.mjs";
@@ -27,7 +28,7 @@ const opt = (n, d = null) => { const i = argv.indexOf(n); return i >= 0 && argv[
 const PROVIDER = opt("--provider", "musicbrainz");
 const LIMIT = Number(opt("--limit", "0"));
 if (!Number.isInteger(LIMIT) || LIMIT < 0) throw new Error("--limit 必须为非负整数");
-const OUT_DIR = process.env.MF_AUDIT_OUT || "docs-local/data-quality";
+const OUT_DIR = auditOutputDirectory();
 const UA = { "User-Agent": "metafusion-curator-local/1.0 ( +https://findverse.cc )" };
 
 const norm = (s) => String(s || "")

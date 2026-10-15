@@ -1,10 +1,10 @@
 # 工作副本、提交与恢复
 
-云端模式使用 [云端操作](reference-cloud.md)，无需执行下述本地命令。普通本地编目使用 `local/tools/mf-workspace.mjs`。每个 Agent 使用自己的工作区，最多 100 个实体/关系条目，一个待推送提交。工作区绑定实例 origin 与操作者，凭据仍从本机 credentials.json 或环境读，工作区不存 PAT。
+云端模式使用 [云端操作](cloud.md)，无需执行下述本地命令。普通本地编目使用 `scripts/tools/mf-workspace.mjs`。每个 Agent 使用自己的工作区，最多 100 个实体/关系条目，一个待推送提交。工作区绑定实例 origin 与操作者，凭据仍从本机 credentials.json 或环境读，工作区不存 PAT。
 
 ## 编辑已有条目
 
-先在系统临时目录下创建独立任务目录，把所有中间文件与工作副本放进去。以下命令在 `local/tools/` 运行（POSIX shell；PowerShell 使用 `$env:TEMP` 和 `$env:MF_TASK_DIR`）：
+先在系统临时目录下创建独立任务目录，把所有中间文件与工作副本放进去。以下命令在 `scripts/tools/` 运行（POSIX shell；PowerShell 使用 `$env:TEMP` 和 `$env:MF_TASK_DIR`）：
 
 ```bash
 export MF_TASK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/metafusion-agent.XXXXXXXX")"

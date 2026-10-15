@@ -33,7 +33,7 @@ export const KINDS = [
   "track",
 ];
 
-/** 来源/证据构造（与 reference-source-policy.md 一致）。 */
+/** 来源/证据构造（与 references/source-policy.md 一致）。 */
 export const src = (url, citation) => ({ kind: "url", url, citation });
 export const selfEvidence = (citation) => ({ kind: "self", citation });
 

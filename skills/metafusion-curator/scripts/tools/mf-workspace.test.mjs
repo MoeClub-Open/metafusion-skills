@@ -93,6 +93,51 @@ function fixture(t) {
   return { dir, id, docs, receipts, calls, fn, opts, read, edit, seal };
 }
 
+test("article edits preserve other locales and structured fields through commit and push", async (t) => {
+  const f = fixture(t);
+  const original = f.docs.get(f.id);
+  original.translations.en.summary = "Preserve summary";
+  original.translations.ja = { title: "原題", body: "日本語本文", aliases: ["別名"] };
+  await runWorkspace("init", f.opts);
+  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
+  const markdown = path.join(f.dir, "article.md");
+  const body = "## History\n\nA sourced article 😀\n";
+  fs.writeFileSync(markdown, body);
+  const result = await runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "en", file: markdown });
+  assert.equal(result.applied, false);
+  const working = f.read(`entities/${f.id}.json`);
+  assert.deepEqual(working.attributes, original.attributes);
+  assert.deepEqual(working.translations.ja, original.translations.ja);
+  assert.equal(working.translations.en.summary, "Preserve summary");
+  assert.equal(working.translations.en.body, body);
+  const sealed = await runWorkspace("commit", { ...f.opts, note: "Add verified history", sources: evidence });
+  const request = f.read(`.mf/commits/${sealed.commit_id}.json`).request;
+  assert.deepEqual(request.operations[0].patch, [{ path: "/translations/en/body", value: body }]);
+  assert.ok(request.operations[0].source_refs.length);
+  await runWorkspace("preview", f.opts);
+  await runWorkspace("push", { ...f.opts, apply: true });
+  assert.equal(f.docs.get(f.id).translations.en.body, body);
+  assert.deepEqual(f.docs.get(f.id).translations.ja, original.translations.ja);
+});
+
+test("article validation leaves the working copy unchanged; a new locale needs a title", async (t) => {
+  const f = fixture(t);
+  await runWorkspace("init", f.opts);
+  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
+  const markdown = path.join(f.dir, "article.md");
+  const before = f.read(`entities/${f.id}.json`);
+  for (const [body, expected] of [["bad\0body", /invalid_article_body/], ["😀".repeat(100001), /article_too_long/]]) {
+    fs.writeFileSync(markdown, body);
+    await assert.rejects(runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "en", file: markdown }), expected);
+    assert.deepEqual(f.read(`entities/${f.id}.json`), before);
+  }
+  fs.writeFileSync(markdown, "正文");
+  await assert.rejects(runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "zh-CN", file: markdown }), /translation_title_required/);
+  await runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "zh-CN", translationTitle: "标题", file: markdown });
+  assert.deepEqual(f.read(`entities/${f.id}.json`).translations["zh-CN"], { title: "标题", body: "正文" });
+  assert.ok(!f.calls.some((call) => call.p.endsWith("/commits")));
+});
+
 test("granular diff preserves unrelated fields, arrays remain atomic, readonly mutation rejected", () => {
   const base = {
     id: "id",

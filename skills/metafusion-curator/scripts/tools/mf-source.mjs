@@ -546,14 +546,14 @@ function helpPayload(target) {
       `${MF_SOURCE_COMMAND} run <operation> <arg> [--out <path>]`,
     ],
     operations: [...registry.operations.values()].map(copyOperation).sort((a, b) => a.id.localeCompare(b.id)),
-    note: `请在 skills/metafusion-curator/local/tools 目录运行命令。${HELP_NOTE} 连接状态只由单次 run 响应报告。`,
+    note: `请在 skills/metafusion-curator/scripts/tools 目录运行命令。${HELP_NOTE} 连接状态只由单次 run 响应报告。`,
   };
   const operation = registry.operations.get(target);
-  if (operation) return { usage: `${MF_SOURCE_COMMAND} run <operation> <arg> [--out <path>]`, note: `请在 skills/metafusion-curator/local/tools 目录运行命令。${HELP_NOTE}`, operation: copyOperation(operation) };
+  if (operation) return { usage: `${MF_SOURCE_COMMAND} run <operation> <arg> [--out <path>]`, note: `请在 skills/metafusion-curator/scripts/tools 目录运行命令。${HELP_NOTE}`, operation: copyOperation(operation) };
   const sourceId = canonicalSourceId(target);
   const source = registry.sources.get(sourceId);
   if (source) return {
-    note: `请在 skills/metafusion-curator/local/tools 目录运行命令。${HELP_NOTE}`,
+    note: `请在 skills/metafusion-curator/scripts/tools 目录运行命令。${HELP_NOTE}`,
     source: { ...source, operation_ids: [...source.operation_ids], limitations: [...source.limitations] },
     operations: source.operation_ids.map(id => copyOperation(registry.operations.get(id))),
   };

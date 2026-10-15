@@ -13,11 +13,11 @@
       }
     }
 
-上述仅演示属性落点，完整创建信封与必填值见 [载荷模板](reference-api-templates.md)。不要向当前请求添加已移除的 `types`；正式用途、媒介属性和身份依实际字段、收录与来源表达，标签不承担业务分类约束。新版可选 creation_form 仅作为 Work 的受控描述与模板条件，词项和模板可通过 GUI 编辑。
+上述仅演示属性落点，完整创建信封与必填值见 [载荷模板](api-templates.md)。不要向当前请求添加已移除的 `types`；正式用途、媒介属性和身份依实际字段、收录与来源表达，标签不承担业务分类约束。新版可选 creation_form 仅作为 Work 的受控描述与模板条件，词项和模板可通过 GUI 编辑。
 
 ## 实体字段与动态属性
 
-title、original_language、translations、attributes、external_links、pictures、status、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](reference-api-templates.md)。created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
+title、original_language、translations、attributes、external_links、pictures、status、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](api-templates.md)。created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
 
 两个易错点：
 
@@ -95,7 +95,7 @@ title、original_language、translations、attributes、external_links、picture
 
 **种子是空组**：未扩展时组内没有任何子字段，`contents[].attributes`（收录附加属性）与 `subjects[].attributes`
 （发行对象附加属性）写任何键都是 `unknown_field`，检索路径 `inclusion_attributes.x` / `subject_attributes.x`
-同样不可用。收录语境属性可按授权在 GUI 为这些组新增子字段；来源是新版 contents[].sources 独立键，不能塞进 attributes 或 locator。作品/表达自身事实和关系仍按各自身份填写，缺少落点时见[模型缺口](reference-model-gaps.md)。
+同样不可用。收录语境属性可按授权在 GUI 为这些组新增子字段；来源是新版 contents[].sources 独立键，不能塞进 attributes 或 locator。作品/表达自身事实和关系仍按各自身份填写，缺少落点时见[模型缺口](model-gaps.md)。
 
 ## `entry_role` 与 `air_date`
 
@@ -134,4 +134,4 @@ title、original_language、translations、attributes、external_links、picture
 | 外部 ID 键未注册 | `invalid_external_id` | 先读 `/api/catalog/external-databases` |
 | 翻译形状/长度不对 | `invalid_translation` / `invalid_locale` / `translation_too_long` | locale 必须是合法语言标签，`title` 非空且 ≤2000，`aliases` 单项 ≤500 |
 
-完整错误码表见 [API 错误码与修复动作](reference-api-errors.md)。
+完整错误码表见 [API 错误码与修复动作](api-errors.md)。

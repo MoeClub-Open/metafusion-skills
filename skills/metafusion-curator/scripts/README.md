@@ -9,4 +9,4 @@
 
 ## 客户端与工作区
 
-`request` 提供认证与只读重试，`collectPages` 保留分页覆盖证明；不提供整实体 putEntity 写入 helper。编目编辑使用 [mf-workspace](../reference-workflow.md)，凭据文件放工作区之外；每个 Agent 使用自己的目录。
+`request` 提供认证与只读重试，`collectPages` 保留分页覆盖证明；不提供整实体 putEntity 写入 helper。编目编辑使用 [mf-workspace](../references/workflow.md)，凭据文件放工作区之外；每个 Agent 使用自己的目录。

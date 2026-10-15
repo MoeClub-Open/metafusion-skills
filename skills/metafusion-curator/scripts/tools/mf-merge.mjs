@@ -17,6 +17,7 @@
 //   · 作用域不同一律拒绝（work 之外的结构实体必须同归属）；
 //   · 遇 status=merged 直接跳过（幂等），不重复提交。
 
+import { auditOutputDirectory } from "./mf-output.mjs";
 import fs from "node:fs";
 import { dirname } from "node:path";
 import {
@@ -47,7 +48,7 @@ if (APPLY && (!Array.isArray(mergeSources) || mergeSources.length === 0)) {
 const ORDER = ["expression", "content_unit", "medium", "track", "work", "release", "collection", "agent"];
 
 const log = [];
-const out = `${process.env.MF_AUDIT_OUT || "docs-local/data-quality"}/mf-merge-${APPLY ? "applied" : "dryrun"}.json`;
+const out = `${auditOutputDirectory()}/mf-merge-${APPLY ? "applied" : "dryrun"}.json`;
 function saveLog() {
   fs.mkdirSync(dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify({ apply: APPLY, atomic: false, merged, skipped, failed, log }, null, 2), "utf8");

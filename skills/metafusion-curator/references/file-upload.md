@@ -20,7 +20,7 @@
 
 目录 `pictures` 与存储资产/绑定是两套状态，没有自动同步或跨服务事务；技术上传成功也不代表版权通过。当前任务明确授权的图片操作可在该范围内执行；操作授权与许可证据分开记录，缺少权利材料标为 `unknown`，不能伪造 `passed`。
 
-1. 按[字段级来源策略](reference-source-policy.md)核对图像身份、具体版次与图源；权利材料另行记录，是否作为额外计数门槛按本批次定义。
+1. 按[字段级来源策略](source-policy.md)核对图像身份、具体版次与图源；权利材料另行记录，是否作为额外计数门槛按本批次定义。
 2. 按获准范围上传或直传，回读资产 `sha256`、MIME、`complete`、`hash_verified`、`blocked` 等状态；禁止缩略图放大、截图、拼贴、拉伸、占位或水印图。
 3. 用 `binding_role=cover_image` 绑定目录实体，GET `/api/storage/entities/{id}/files` 核对 asset_id 与角色完全一致。
 4. 非 Track 实体使用完整 PUT 写 `pictures[]`，自托管图片项同时写对应资产 UUID 到 `asset_id`，保留合法 `url`、其它图片与实体字段，并带 `expected_version`；响应后回读实体、当前 revisions 和存储绑定。Track 禁止整实体 PUT，当前专用端点只修改收录或状态；需要维护 Track 图片时报告接口缺口，不能复用此步骤。
