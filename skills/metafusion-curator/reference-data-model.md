@@ -30,6 +30,12 @@ Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文�
 - subjects/medium 可为空而入库，但不等于收录完整。先写 subjects，再补 Track.contents；跨实体不原子，失败核已提交部分。
 - attributes 受当前 enabled/applicable_kinds 与词表约束，没有实体 types；细节见 [字段](reference-types-and-fields.md)。
 
+## 条目正文
+
+目标实例的 OpenAPI 声明 `Translation.body` 时，`translations.<locale>.summary` 保存简短纯文本简介，`body` 保存可选 Markdown 条目说明（每语种最多 100000 个 Unicode 字符）。正文由目录服务共同维护，沿用实体权限、状态、来源和修订；它不等于被编目 Expression 的原文，也不替代日期、署名、收录及关系等结构化事实。社区承载讨论与署名考据。
+
+只改正文时使用 `/translations/<locale>/body` patch 和对应 `source_refs.pointers`，保留其它语言与字段，不提交身份复核数组。脚注用于展示引用，提交仍需有效外部来源；同一正文的并发冲突需人工合并。实例尚未声明该字段时不能尝试写入或借 `attributes` 绕过。
+
 ## 表达与版本
 
 | 能力 | 约束 |
