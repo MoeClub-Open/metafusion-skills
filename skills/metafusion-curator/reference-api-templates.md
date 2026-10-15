@@ -29,6 +29,36 @@
 
 Agent 普通编辑使用 checkout 与 CatalogCommit，完整协议只维护在[公开提交文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md)，本地流程见[提交与恢复](reference-workflow.md)。操作携带 base_version、JSON Pointer patch；实体创建声明 reviewed_candidate_ids 与本批 ref。
 
+**破坏性变更（无兼容模式）：** 每个 `sources[]` 必须有唯一 `key`；每个操作必须有非空 `source_refs`（`[{source:<key>, pointers?:[json-pointer]}]`）。缺 key → `source_key_required`；缺/空 `source_refs` → `400 {"error":"source_refs_required","applied":false,"operation":<从0起>}`；池中未被引用的来源 → `source_unused`。旧格式提交一律拒绝，客户端必须升级。本地 `mf-workspace commit` 会在缺省时自动补 `s1…` key 并把全部来源挂到每个操作；云端 MCP / 手写载荷必须自己写全。 本地默认映射要求所给来源确实支持每个操作；不同条目或字段使用不同证据时应拆分提交，不能把自动映射当作字段来源核验。
+
+    {
+      "id": "<固定 UUID>",
+      "definitions_etag": "<checkout 返回值>",
+      "edit_note": "根据官方目录补充题名",
+      "sources": [
+        {"key": "catalog", "kind": "url", "citation": "官方目录支持题名", "url": "https://example.org/catalog"}
+      ],
+      "operations": [
+        {
+          "target": "entity",
+          "action": "update",
+          "id": "<实体 UUID>",
+          "base_version": 3,
+          "reviewed_candidate_ids": [],
+          "patch": [{"path": "/translations/zh-CN/title", "value": "中文题名"}],
+          "source_refs": [{"source": "catalog", "pointers": ["/translations/zh-CN/title"]}]
+        },
+        {
+          "target": "entity",
+          "action": "create",
+          "ref": "recording",
+          "reviewed_candidate_ids": [],
+          "document": {"kind": "expression", "title": "录音", "work_id": "<Work UUID>"},
+          "source_refs": [{"source": "catalog"}]
+        }
+      ]
+    }
+
 ## 单对象交互式信封
 
 创建与更新共用同一信封：`POST /api/catalog/entities`（`expected_version` 必须为 0、`entity.id` 留空）与

@@ -148,6 +148,37 @@ test("rebase merges disjoint fields and requires explicit overlap resolution", (
   ]);
   assert.equal({}.polluted, undefined);
 });
+test("commit auto-fills source key and source_refs so server-required evidence mapping is present", async (t) => {
+  const f = fixture(t),
+    local = await f.seal();
+  const sealed = f.read(`.mf/commits/${local.commit_id}.json`).request;
+  assert.equal(sealed.sources.length, 1);
+  assert.equal(sealed.sources[0].key, "s1");
+  assert.ok(sealed.operations.every((op) => Array.isArray(op.source_refs) && op.source_refs.length === 1 && op.source_refs[0].source === "s1"));
+  // Push body must carry the same mapping (server rejects missing source_refs).
+  await runWorkspace("push", { ...f.opts, apply: true });
+  const push = f.calls.find((c) => c.p.endsWith("/commits") && c.o?.method !== undefined ? true : c.p.endsWith("/commits"));
+  assert.ok(push);
+  const body = push.o.body;
+  assert.equal(body.sources[0].key, "s1");
+  assert.equal(body.operations[0].source_refs[0].source, "s1");
+});
+test("generated evidence keys avoid explicit keys and invalid mappings fail before sealing", async (t) => {
+  const f = fixture(t);
+  const sealed = await f.seal({ sources: [{...evidence[0],key:"s1"},{...evidence[0]}] });
+  const request = f.read(`.mf/commits/${sealed.commit_id}.json`).request;
+  assert.deepEqual(request.sources.map(source => source.key),["s1","s2"]);
+  assert.deepEqual(request.operations[0].source_refs,[{source:"s1"},{source:"s2"}]);
+  for (const [sources,error] of [
+    [[{...evidence[0],key:42}],"invalid_source_key"],
+    [[{...evidence[0],key:"same"},{...evidence[0],key:"same"}],"duplicate_source_key"],
+    [[{...evidence[0],pointers:["/title"]}],"source_pointers_not_allowed"],
+    [[{...evidence[0],scope:"commit"}],"source_scope_not_allowed"],
+  ]) {
+    const invalid = fixture(t);
+    await assert.rejects(invalid.seal({sources}),new RegExp(error));
+  }
+});
 test("commit is local, push atomic receipt refreshes base, no entity PUT", async (t) => {
   const f = fixture(t),
     local = await f.seal();

@@ -21,6 +21,10 @@
 | 错误码 | 含义 | 修复动作 |
 | --- | --- | --- |
 | `evidence_required` | 缺 `edit_note`，或 `sources` 为空 | 补具体修改说明 + 至少一条来源；这只是载荷门，仍须按[字段级来源策略](reference-source-policy.md)逐字段核验 P1 |
+| `source_refs_required` | 某个操作缺或空 `source_refs`（响应常带 `applied:false` 与 `operation` 索引） | 给该操作补 `source_refs:[{source:<sources[].key>, pointers?:[...]}]`；无兼容模式，旧格式会被拒绝 |
+| `source_key_required` / `invalid_source_key` / `duplicate_source_key` | 来源池缺 key、key 不合规或重复 | 每条 source 给唯一 `key`（`^[A-Za-z][A-Za-z0-9_-]{0,63}$`） |
+| `source_unused` / `unknown_source_ref` / `duplicate_source_ref` | 池中有未被引用的来源，或操作引用了不存在/重复的 key | 每个 key 至少被一个操作引用一次；删掉多余来源或补引用 |
+| `invalid_source_pointer` / `source_pointer_not_in_document` / `source_pointer_not_patched` | 指针非法，或不在 create document / update patch 覆盖范围内 | 指针用 JSON Pointer（以 `/` 开头）；create 必须能在 document 里解析，update 必须覆盖某条 patch 路径 |
 | `commit_conflict` | 同字段产生不同并发改动，整批回滚 | 保留提交，核证据后明确 ours/theirs 并 rebase |
 | `transaction_busy`（503） | 数据库已回滚本次请求，有界尝试耗尽；提交响应带 `applied=false` | 尊重 Retry-After，稍后显式 push 同 ID、同载荷；此前未知的推送仍须查回执，不能被本次失败覆盖 |
 | `definitions_conflict` | 定义基线变化 | 核当前动态约束再 rebase |
