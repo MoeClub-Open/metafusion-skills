@@ -122,11 +122,25 @@ function validateReview(ids, allowLocal = false) {
  *  local tool producing valid payloads so Agents do not submit failing commits. */
 function normalizeCommitEvidence(evidence, operations) {
   if (!Array.isArray(evidence) || !evidence.length) throw new Error("commit_evidence_required");
+  const reserved = new Set();
+  for (const raw of evidence) {
+    if (!record(raw)) throw new Error("invalid_source");
+    if (raw.key !== undefined && typeof raw.key !== "string") throw new Error("invalid_source_key");
+    const key = raw.key?.trim();
+    if (key) {
+      if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)) throw new Error("invalid_source_key");
+      if (reserved.has(key)) throw new Error("duplicate_source_key");
+      reserved.add(key);
+    }
+  }
   const used = new Set();
-  const sources = evidence.map((raw, i) => {
+  let counter = 0;
+  const sources = evidence.map((raw) => {
     if (!record(raw)) throw new Error("invalid_source");
     let key = typeof raw.key === "string" ? raw.key.trim() : "";
-    if (!key) key = `s${i + 1}`;
+    if (!key) {
+      do { counter += 1; key = `s${counter}`; } while (reserved.has(key) || used.has(key));
+    }
     if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)) throw new Error("invalid_source_key");
     if (used.has(key)) throw new Error("duplicate_source_key");
     used.add(key);
