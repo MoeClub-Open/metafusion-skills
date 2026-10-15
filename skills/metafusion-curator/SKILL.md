@@ -18,7 +18,7 @@ description: MetaFusion 实体编目、查重、关系维护与数据质检。�
 - 开始实例操作时核 OpenAPI 与 definitions；字段、关系、词项使用当前启用定义。
 - 查重核 kind、内容身份、父级作用域与 canonical ID；同名或同 Work 不证明同一 Expression。正式题名不机械清洗。
 - Release `subjects` 声明 Work，Track `contents` 引用 Expression；先声明 subjects，再补收录。
-- 普通实体/关系编辑只走变更集：checkout → 构造修改 → commit → preview → push → 回执与展示核验，不调用旧整实体 PUT 工具。云端用 MCP 封存提交；本地模式使用系统临时目录下的独立任务工作区，所有中间脚本、草稿、查询与输出均放任务目录，不写入本仓库；[提交与恢复](reference-workflow.md)。
+- 普通实体/关系编辑只走变更集：checkout → 构造修改 → commit → preview → push → 回执与展示核验，不调用旧整实体 PUT 工具。云端用 MCP 封存提交；本地模式使用系统临时目录下的独立任务工作区，所有中间脚本、草稿、查询与输出均放任务目录，不写入本仓库；[提交与恢复](reference-workflow.md)。**提交证据必填：** 每条 source 要有唯一 `key`，每个操作要有 `source_refs`；旧格式会被 `source_refs_required` 拒绝（见[载荷模板](reference-api-templates.md#变更集信封)）。本地 `mf-workspace commit` 会自动补 key/source_refs；MCP 手写载荷必须自己写全。
 - 创建先核可见 canonical 候选，保存 reviewed_candidate_ids；有候选只在来源证明不同身份后列为已审查。服务端按题名、各语言题名、外部 ID 和结构作用域复核，集合变化需重新审查。
 - 不同字段自动合并；同字段冲突须明确取舍再 rebase。未知推送保留同 ID、同载荷，先查回执；不能换 ID、重建计划、睡眠等全库稳定或盲目重试旧写接口。
 - 结构和关系提交已按事务并行。`transaction_busy` 尊重 Retry-After 后显式推送原提交；服务端只自动重试数据库确认回滚的事务，不把网络未知结果当失败。不要等待全库低峰或增加 Agent 绕过热点。

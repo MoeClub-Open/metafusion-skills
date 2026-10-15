@@ -114,6 +114,38 @@ function validateReview(ids, allowLocal = false) {
     throw new Error("invalid_identity_review");
   return ids;
 }
+
+/** Commit evidence pool: every source needs a unique key; every operation must cite
+ *  sources via source_refs. Auto-fills missing keys (s1, s2, …) and, when an
+ *  operation omits source_refs, cites every pool source for the whole operation.
+ *  Old format without keys/source_refs is rejected by the server; this keeps the
+ *  local tool producing valid payloads so Agents do not submit failing commits. */
+function normalizeCommitEvidence(evidence, operations) {
+  if (!Array.isArray(evidence) || !evidence.length) throw new Error("commit_evidence_required");
+  const used = new Set();
+  const sources = evidence.map((raw, i) => {
+    if (!record(raw)) throw new Error("invalid_source");
+    let key = typeof raw.key === "string" ? raw.key.trim() : "";
+    if (!key) key = `s${i + 1}`;
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)) throw new Error("invalid_source_key");
+    if (used.has(key)) throw new Error("duplicate_source_key");
+    used.add(key);
+    const { pointers, scope, ...rest } = raw;
+    if (pointers !== undefined && pointers !== null && !(Array.isArray(pointers) && pointers.length === 0))
+      throw new Error("source_pointers_not_allowed");
+    if (scope) throw new Error("source_scope_not_allowed");
+    return { ...rest, key };
+  });
+  const defaultRefs = sources.map((s) => ({ source: s.key }));
+  const ops = operations.map((op) => {
+    if (!record(op)) throw new Error("invalid_commit_operation");
+    if (Array.isArray(op.source_refs) && op.source_refs.length)
+      return op;
+    return { ...op, source_refs: defaultRefs.map((r) => ({ ...r })) };
+  });
+  return { sources, operations: ops };
+}
+
 function evidenceEligible(evidence, origin, blockedHosts = []) {
   const blocked = new Set(["findverse.cc"]);
   for (const value of [origin, process.env.MF_API_ORIGIN, process.env.MF_BASE, ...blockedHosts]) {
@@ -502,12 +534,13 @@ export async function runWorkspace(
       if (!editNote?.trim() || !Array.isArray(evidence) || !evidence.length)
         throw new Error("commit_evidence_required");
       evidenceEligible(evidence, origin, blockedHosts);
+      const normalized = normalizeCommitEvidence(evidence, operations);
       const request = {
         id: randomUUID(),
         definitions_etag: state.definitions_etag,
         edit_note: editNote,
-        sources: evidence,
-        operations,
+        sources: normalized.sources,
+        operations: normalized.operations,
       };
       save(
         safeFile(root, `.mf/commits/${request.id}.json`),

@@ -20,7 +20,7 @@ node mf-workspace.mjs push --dir "$MF_TASK_DIR/catalog" --apply
 
 Windows PowerShell 示例：`$env:MF_TASK_DIR = Join-Path $env:TEMP ("metafusion-agent-" + [guid]::NewGuid().ToString('N'))`，`New-Item -ItemType Directory -Path $env:MF_TASK_DIR`；随后用 `$env:MF_TASK_DIR/catalog` 指定 `--dir`。绝不复用其他 Agent 的任务目录。`--sources` 等路径指向临时任务目录中的真实文件，不能因为改到临时目录就跳过来源核验。**有 pending、未知回执或恢复需要时禁止删除工作副本**；完成并核对后仅清理本任务生成的文件。
 
-先核 OpenAPI、definitions 与事实来源。`commit` 只写本地不可变请求，自动按对象键生成稀疏 patch；数组整体比较，不能以数组下标代表事实身份。遗漏对象键保留线上原值，`status/commit` 会列出 `ignored_omissions`；只有遗漏而没有其他改动时不封存提交。要删除一个已有键，先从工作文件移除它，再给 `commit` 明确传 `--remove 'entity:<UUID>:/attributes/<key>'`（关系用 `relation:<UUID>:/attributes/<key>`，可重复）。路径必须存在于基线且已从工作文件移除；未知动态字段仍由 `preview` 核验。`null` 是明确赋值，数组缩减是完整数组替换。`preview` 运行真实服务端校验后整笔回滚。`push --apply` 执行已获任务授权的写入，开关本身不是授权。
+先核 OpenAPI、definitions 与事实来源。`commit` 只写本地不可变请求，自动按对象键生成稀疏 patch，并为每条来源补唯一 `key`、给每个操作挂上 `source_refs`（服务端必填，旧格式会 `source_refs_required`）；数组整体比较，不能以数组下标代表事实身份。遗漏对象键保留线上原值，`status/commit` 会列出 `ignored_omissions`；只有遗漏而没有其他改动时不封存提交。要删除一个已有键，先从工作文件移除它，再给 `commit` 明确传 `--remove 'entity:<UUID>:/attributes/<key>'`（关系用 `relation:<UUID>:/attributes/<key>`，可重复）。路径必须存在于基线且已从工作文件移除；未知动态字段仍由 `preview` 核验。`null` 是明确赋值，数组缩减是完整数组替换。`preview` 运行真实服务端校验后整笔回滚。`push --apply` 执行已获任务授权的写入，开关本身不是授权。
 
 修改实体 `/title`、`/external_ids` 及子路径、整组 `/translations`、整行 `/translations/<locale>` 或翻译题名时，先重新查询身份候选，再通过 `--reviews` 文件提供 `{"entity:<UUID>":["<已复核的 canonical UUID>"]}`；零候选也明确写 `[]`。更新时过滤当前实体自身和 canonical 指向当前实体的历史别名，只列其他候选。仅改译文摘要或别名子路径无需该数组，非身份更新附带数组会被拒绝。候选不等于重复；必须核来源确认候选身份后才列入数组。
 
