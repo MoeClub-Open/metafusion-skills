@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Universal Music Japan | `umj.product` 官方商品页 | 输入 `artist-slug/product-code` 并严格核对页面品番：有可见「品番」行时须与请求完全一致（`verified_exact`）；数字发行页无品番行时须 canonical 路径 slug+品番与请求一致且 ld+json 面包屑/WebPage 双重确认同一品番（`verified_canonical_ld`），否则 `identity_mismatch`。结果含 `image_urls` 候选和 `field_status` 字段状态；按字段复核，不据此自动认定图片或曲目归属。 |
 | Pony Canyon、Canime、Sony Music | `publisher.pony_canyon`、`publisher.canime`、`publisher.sony_music` 官方产品页 | 输入形式查工具 help。页面缺字段时按未核实处理；Sony 不存在的品番回落到艺人索引页时报 `notfound`（不拼输入品番）。Pony/Canime 支持 `YYYY.M.D 発売` 发售日与价格窗口回退全文。 |
-| Bushiroad Music（`bushiroad_music`；别名 `bushiroad`） | `publisher.bushiroad_music` 商品页 | 示例 `node mf-source.mjs run publisher.bushiroad_music BRMM-11078` 查询同页候选 BRMM-11077/11078。品番直达失败时扫描官方目录 ACF（非 WordPress search）；`requested_catalog_number` 保留请求品番，多版时 `catalog_number` 为 `null`，`catalog_candidates` 形如 `{edition,catalog_number}`。 |
+| Bushiroad Music（`bushiroad_music`；别名 `bushiroad`） | `publisher.bushiroad_music` 商品页 | 示例 `node mf-source.ts run publisher.bushiroad_music BRMM-11078` 查询同页候选 BRMM-11077/11078。品番直达失败时扫描官方目录 ACF（非 WordPress search）；`requested_catalog_number` 保留请求品番，多版时 `catalog_number` 为 `null`，`catalog_candidates` 形如 `{edition,catalog_number}`。 |
 | BanG Dream（`bang_dream`；别名 `bangdream`） | `publisher.bang_dream` Discography 页面 | 只接受 HTTPS `/discographies/{numeric-id}/` 完整 URL；URL 未提供品番时 `requested_catalog_number` 为 `null`。多版时 `catalog_number` 为 `null`，候选见 `catalog_candidates`（`{edition,catalog_number}`）。 |
 | Wikidata、Bangumi、MusicBrainz | `wikidata.*`；`bangumi.*`；`musicbrainz.*` 搜索或记录读取（含 `musicbrainz.release.barcode` 条码反查与 `musicbrainz.release.catno` 品番反查；`release.search` 仅题名检索） | 搜索结果是候选；核对 kind、具体作品/版次与身份锚点。它们作为聚合或编目来源不能仅凭站点名升级为 CORE-P1。 |
 
@@ -42,13 +42,13 @@ iTunes 封面编号：Apple 的 `artworkUrl*` 原图文件名段常常就是发�
 
 ## 失败与证据判读
 
-`mf-fetch-providers.mjs` 完成读取后的顶层 `url` 是实际读取的响应地址（含重定向后的地址），`sha256` 对应该响应正文的原始读取字节，不能用解析后的 JSON、截断的 `raw` 或重新编码的文本重算。`request_url` / `request_method` 描述请求；POST 另带 `request_body_sha256`。`human_page` 与 `image_page_url` 只供人工导航，可能未请求过，不能替换证据 URL。检索返回的候选项 URL 同样只作导航；`found:false` 的证据地址仍指本次实际答复。纯 `map*` / `parse*` 不发请求，不提供实读摘要。
+`mf-fetch-providers.ts` 完成读取后的顶层 `url` 是实际读取的响应地址（含重定向后的地址），`sha256` 对应该响应正文的原始读取字节，不能用解析后的 JSON、截断的 `raw` 或重新编码的文本重算。`request_url` / `request_method` 描述请求；POST 另带 `request_body_sha256`。`human_page` 与 `image_page_url` 只供人工导航，可能未请求过，不能替换证据 URL。检索返回的候选项 URL 同样只作导航；`found:false` 的证据地址仍指本次实际答复。纯 `map*` / `parse*` 不发请求，不提供实读摘要。
 
 多语种读取在 `evidence_reads` 中逐次保留 URL、方法、HTTP 状态、字节摘要与读取时间；顶层 URL 和摘要对应主响应。带凭据的查询 URL 输出 `[REDACTED]` 并标 `url_redacted:true`，表示安全脱敏后的读取端点，不能声称该字面 URL 可直接复取同一响应；密钥不进入证据记录。Wayback 查询返回的 `snapshot_url` 是未读取的存档候选，读取存档正文后的 `url` / `sha256` 才是正文证据。
 
 来源目录、操作帮助与调用结果的 `source_qualification` 提供 `level`、`can_independently_support_core_identity`、`scope`、`field_limits`。这是客户端的字段来源指引；社区来源可以作为证据，`false` 只表示不能单独支撑核心身份结论，不禁止封存。API 由站点维护、需要 key 或 HTTP 成功都不自动升级字段证据资格。OpenBD 用于书目复核，Gutenberg 只对自己的数字版次有出版方资格；这不是服务端 definitions 资格配置。
 
-封面 URL 均为候选：CAA 仅把 `front=true` 的图作为主候选，无正面时 `image_url:null` 并保留图组；Gutenberg 仅返回本次 RDF `hasFormat` 明示的图片，没有明示图片时不按编号拼图。`mf-providers-smoke.mjs --images` 只用 HEAD 报告 `image_transport`（响应状态、HTTP 成功和声明的媒体类型），内容、身份与权利仍为未核实；不会输出 `image_check.ok` 或“封面正确”结论。
+封面 URL 均为候选：CAA 仅把 `front=true` 的图作为主候选，无正面时 `image_url:null` 并保留图组；Gutenberg 仅返回本次 RDF `hasFormat` 明示的图片，没有明示图片时不按编号拼图。`mf-providers-smoke.ts --images` 只用 HEAD 报告 `image_transport`（响应状态、HTTP 成功和声明的媒体类型），内容、身份与权利仍为未核实；不会输出 `image_check.ok` 或“封面正确”结论。
 
 - 只把连接器明确验证为未找到的结果视作 `found:false`。对 ISNI / VIAF 尤其区分登记记录缺失与网关 404、反爬页或响应格式变化；`2xx` 或 HTTP 404 均不能单独证明有/无记录。
 - 凭据缺失、401/403、限流、网络/超时、5xx、反爬、网关错误和解析失败都不是“没有数据”。依结构化错误的 `kind` / `retryable` / `hint` 处理；状态不明时停止依赖该结果的写入。

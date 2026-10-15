@@ -14,17 +14,17 @@
 | 合并已核实重复 | `mf-merge`；先 dry-run，多步非原子，部分完成不盲重跑 |
 
 ```bash
-node mf-source.mjs list
-node mf-source.mjs help umj.product
-node mf-platform.mjs list
-node mf-platform.mjs --plan read-plan.json --out result.json
-node mf-workspace.mjs help
-node mf-workspace.mjs init --dir "$MF_TASK_DIR/catalog"
-node mf-workspace.mjs checkout --dir "$MF_TASK_DIR/catalog" --entity <UUID>
-node mf-workspace.mjs commit --dir "$MF_TASK_DIR/catalog" --note "核实题名" --sources "$MF_TASK_DIR/sources.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
-node mf-workspace.mjs preview --dir "$MF_TASK_DIR/catalog"
-node mf-workspace.mjs push --dir "$MF_TASK_DIR/catalog" --apply
-node mf-definitions.mjs help
+node mf-source.ts list
+node mf-source.ts help umj.product
+node mf-platform.ts list
+node mf-platform.ts --plan read-plan.json --out result.json
+node mf-workspace.ts help
+node mf-workspace.ts init --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.ts checkout --dir "$MF_TASK_DIR/catalog" --entity <UUID>
+node mf-workspace.ts commit --dir "$MF_TASK_DIR/catalog" --note "核实题名" --sources "$MF_TASK_DIR/sources.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
+node mf-workspace.ts preview --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.ts push --dir "$MF_TASK_DIR/catalog" --apply
+node mf-definitions.ts help
 ```
 
 完整创建、依赖、冲突和恢复流程见[提交与恢复](../../references/workflow.md)。每个 Agent 独立目录；一个工作区一个待推送提交，未知回执不换 ID。`mf-platform` 只读；旧写计划与 `mf-guarded-update` 不再保留兼容通道。

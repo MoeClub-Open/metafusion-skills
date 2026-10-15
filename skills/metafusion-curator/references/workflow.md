@@ -1,6 +1,6 @@
 # 工作副本、提交与恢复
 
-云端模式使用 [云端操作](cloud.md)，无需执行下述本地命令。普通本地编目使用 `scripts/tools/mf-workspace.mjs`。每个 Agent 使用自己的工作区，最多 100 个实体/关系条目，一个待推送提交。工作区绑定实例 origin 与操作者，凭据仍从本机 credentials.json 或环境读，工作区不存 PAT。
+云端模式使用 [云端操作](cloud.md)，无需执行下述本地命令。普通本地编目使用 `scripts/tools/mf-workspace.ts`。每个 Agent 使用自己的工作区，最多 100 个实体/关系条目，一个待推送提交。工作区绑定实例 origin 与操作者，凭据仍从本机 credentials.json 或环境读，工作区不存 PAT。
 
 ## 编辑已有条目
 
@@ -9,13 +9,13 @@
 ```bash
 export MF_TASK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/metafusion-agent.XXXXXXXX")"
 # init 要求工作副本目录尚不存在：
-node mf-workspace.mjs init --dir "$MF_TASK_DIR/catalog"
-node mf-workspace.mjs checkout --dir "$MF_TASK_DIR/catalog" --entity <UUID> --relation <UUID>
+node mf-workspace.ts init --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.ts checkout --dir "$MF_TASK_DIR/catalog" --entity <UUID> --relation <UUID>
 # 编辑 $MF_TASK_DIR/catalog/entities/<UUID>.json、relations/<UUID>.json；保持只读字段不变
-node mf-workspace.mjs status --dir "$MF_TASK_DIR/catalog"
-node mf-workspace.mjs commit --dir "$MF_TASK_DIR/catalog" --note "官方题名修订" --sources "$MF_TASK_DIR/sources.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
-node mf-workspace.mjs preview --dir "$MF_TASK_DIR/catalog"
-node mf-workspace.mjs push --dir "$MF_TASK_DIR/catalog" --apply
+node mf-workspace.ts status --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.ts commit --dir "$MF_TASK_DIR/catalog" --note "官方题名修订" --sources "$MF_TASK_DIR/sources.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
+node mf-workspace.ts preview --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.ts push --dir "$MF_TASK_DIR/catalog" --apply
 ```
 
 Windows PowerShell 示例：`$env:MF_TASK_DIR = Join-Path $env:TEMP ("metafusion-agent-" + [guid]::NewGuid().ToString('N'))`，`New-Item -ItemType Directory -Path $env:MF_TASK_DIR`；随后用 `$env:MF_TASK_DIR/catalog` 指定 `--dir`。绝不复用其他 Agent 的任务目录。`--sources` 等路径指向临时任务目录中的真实文件，不能因为改到临时目录就跳过来源核验。**有 pending、未知回执或恢复需要时禁止删除工作副本**；完成并核对后仅清理本任务生成的文件。
@@ -35,9 +35,9 @@ Windows PowerShell 示例：`$env:MF_TASK_DIR = Join-Path $env:TEMP ("metafusion
 身份审查文件形状是 `{"reviewed_candidate_ids":[]}`。非空时列 canonical UUID，并在任务证据中说明来源如何证明这些候选与新对象不同；有相同身份就复用，不创造新条目。同批先创建的候选可写 `@local:ref`。新 Work/Release/Medium 的下级作用域尚不存在，不把其他作用域的同名对象加入审查列表。
 
 ```bash
-node mf-workspace.mjs create --dir "$MF_TASK_DIR/catalog" --target entity --ref work --file "$MF_TASK_DIR/work.json" --review "$MF_TASK_DIR/identity-review.json"
-node mf-workspace.mjs create --dir "$MF_TASK_DIR/catalog" --target entity --ref recording --file "$MF_TASK_DIR/expression.json" --review "$MF_TASK_DIR/identity-review.json"
-node mf-workspace.mjs create --dir "$MF_TASK_DIR/catalog" --target relation --ref credit --file "$MF_TASK_DIR/relation.json"
+node mf-workspace.ts create --dir "$MF_TASK_DIR/catalog" --target entity --ref work --file "$MF_TASK_DIR/work.json" --review "$MF_TASK_DIR/identity-review.json"
+node mf-workspace.ts create --dir "$MF_TASK_DIR/catalog" --target entity --ref recording --file "$MF_TASK_DIR/expression.json" --review "$MF_TASK_DIR/identity-review.json"
+node mf-workspace.ts create --dir "$MF_TASK_DIR/catalog" --target relation --ref credit --file "$MF_TASK_DIR/relation.json"
 ```
 
 工作区按照加入顺序提交；先声明 Work，再 Expression、Release.subjects、Medium、Track.contents 与关系。同一批实体创建与身份更新在推送事务内复核候选集合，同身份条件并发写入会返回需要审查的新候选。候选只能覆盖调用者可见范围；身份检索不构成全目录唯一约束。
@@ -62,10 +62,10 @@ node mf-workspace.mjs create --dir "$MF_TASK_DIR/catalog" --target relation --re
 ```
 
 ```bash
-node mf-workspace.mjs rebase --dir "$MF_TASK_DIR/catalog" --resolutions "$MF_TASK_DIR/resolutions.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
-node mf-workspace.mjs preview --dir "$MF_TASK_DIR/catalog"
-node mf-workspace.mjs push --dir "$MF_TASK_DIR/catalog" --apply
-node mf-workspace.mjs receipt --dir "$MF_TASK_DIR/catalog" --resolutions "$MF_TASK_DIR/resolutions.json"
+node mf-workspace.ts rebase --dir "$MF_TASK_DIR/catalog" --resolutions "$MF_TASK_DIR/resolutions.json" --reviews "$MF_TASK_DIR/identity-reviews.json"
+node mf-workspace.ts preview --dir "$MF_TASK_DIR/catalog"
+node mf-workspace.ts push --dir "$MF_TASK_DIR/catalog" --apply
+node mf-workspace.ts receipt --dir "$MF_TASK_DIR/catalog" --resolutions "$MF_TASK_DIR/resolutions.json"
 ```
 
 每次 rebase 都生成新提交，旧不可变文件继续保留供恢复。只有明确拒绝的原提交才能 rebase；持久回执确认已应用时优先完成刷新。

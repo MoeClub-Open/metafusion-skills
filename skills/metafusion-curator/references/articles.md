@@ -13,7 +13,7 @@
 先 checkout 实体，在任务临时目录准备 UTF-8 Markdown，再修改工作副本：
 
 ```sh
-node scripts/tools/mf-workspace.mjs article --dir TASK_DIR --entity ENTITY_UUID --lang zh-CN --file TASK_DIR/article.md --title 中文标题
+node scripts/tools/mf-workspace.ts article --dir TASK_DIR --entity ENTITY_UUID --lang zh-CN --file TASK_DIR/article.md --title 中文标题
 ```
 
 已有语言可省略 `--title`；新建但尚未推送的实体用 `--ref` 代替 `--entity`。该命令只改工作副本，不请求平台写入，也不自动生成来源。之后执行 commit、preview、显式 push。清空正文时明确提供空 Markdown 文件，不删除整项翻译。

@@ -1,0 +1,17 @@
+{
+  "name": "metafusion-skills",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test skills/metafusion-curator/scripts/metafusion-api.test.ts skills/metafusion-curator/scripts/tools/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24",
+    "typescript": "7.0.2"
+  }
+}

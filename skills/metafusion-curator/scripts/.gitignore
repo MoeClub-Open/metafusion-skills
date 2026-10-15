@@ -2,15 +2,15 @@
 *
 !.gitignore
 !README.md
-!metafusion-api.mjs
-!metafusion-api.test.mjs
+!metafusion-api.ts
+!metafusion-api.test.ts
 # 可复用编目工具（mf-*），见 tools/README.md
 !tools/
 !tools/templates/
 !tools/templates/list-price-field.json
 !tools/README.md
 !tools/README-providers.md
-!tools/mf-*.mjs
+!tools/mf-*.ts
 # 提供方连接器的离线单测样本（真实响应的切片；合成样本文件名含 .synthetic.）
 !tools/__fixtures__/
 !tools/__fixtures__/*

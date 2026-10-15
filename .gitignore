@@ -20,3 +20,5 @@ __pycache__/
 /skills/workspaces/
 /skills/metafusion-curator/tmp/
 /skills/metafusion-curator/tools/
+
+/node_modules/

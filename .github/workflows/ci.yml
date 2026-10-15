@@ -1,0 +1,20 @@
+name: Skills
+on: [push, pull_request]
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - name: Single TypeScript tool format
+        run: test -z "$(git ls-files '*.mjs')"
+      - name: Relationship query tests
+        run: python3 -m unittest discover -s skills/metafusion-relationship-query/scripts -p 'test_*.py'

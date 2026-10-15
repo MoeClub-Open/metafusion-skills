@@ -1,6 +1,8 @@
 # 本地运行时
 
-[工具入口](tools/README.md)。所有 MetaFusion HTTP 经 `metafusion-api.mjs`。
+[工具入口](tools/README.md)。所有 MetaFusion HTTP 经 `metafusion-api.ts`。
+
+本地工具使用 Node.js 24+ 原生运行 TypeScript；完整复制技能目录并保留上级 `package.json`。不提供 JavaScript 包装器或编译产物。仓库开发校验使用 `bun install --frozen-lockfile`、`bun run typecheck` 与 `bun run test`。
 
 ## 凭据
 
