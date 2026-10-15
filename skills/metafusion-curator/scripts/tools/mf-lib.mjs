@@ -519,6 +519,8 @@ export async function mergeEntity({
         body: commit,
         tries: 1,
       });
+      if(w.status===202 && w.body?.review_status==="pending_review" && w.body?.applied===false)
+        return result(false,"pending_review_stop_merge",{commit_id:commit.id,applied:false,queued:true});
       if (w.status === 0 || w.status >= 500)
         return result(false, "commit_push_unknown", {
           commit_id: commit.id,
@@ -573,7 +575,7 @@ export async function mergeEntity({
     if (
       !current ||
       current.version !== currentLose.version ||
-      current.status === "merged"
+      current.state === "merged"
     )
       return result(false, "version_conflict: 合并前对象已改变；停止");
     const m = await request(

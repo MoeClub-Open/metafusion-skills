@@ -91,7 +91,7 @@ const stats = {
 // 2. 深度检查创作链、承载链与跨链引用
 console.log("\n正在审查创作链、承载链与跨链引用...");
 for (const [id, e] of sampleMap.entries()) {
-  if (e.status === "deleted" || e.status === "merged") continue;
+  if (e.state === "deleted" || e.state === "merged") continue;
 
   // 创作链：content_unit 是否带 work_id，且 work_id 有效
   if (e.kind === "content_unit") {

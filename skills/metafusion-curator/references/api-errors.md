@@ -97,7 +97,7 @@ A→B 与 B→A 可能都被服务器接受；同一事实的反向展示不需�
 | --- | --- | --- |
 | `version_conflict`（409） | 实体/关系的 `expected_version` 不匹配，或 definitions 的 `expected_etag` 缺失/不匹配 | 回读完整目标，确认并发改动后再决定是否基于当前状态重做；客户端不得自动重放 mutate。关系删除不带版本也走这里 |
 | `use_lifecycle_endpoint` | 用 PUT 提交 `deleted`/`merged`，或把已发布条目降级（`published → draft`） | 停用/合并走 `POST /api/catalog/entities/{id}/lifecycle`（body `{target_id?, expected_version, edit_note, sources}`，没有 `action`）；退回走 `POST /api/catalog/entities/{id}/unpublish`（权限 `catalog.lifecycle.manage`，body `{expected_version, edit_note, sources}`，不能带 `target_id`） |
-| `invalid_status` | lifecycle 作用在 `deleted`/`merged` 条目上，或状态值非法；下架端点收到的实体不是 `published`（`draft`/`pending_review` 没有可下架的内容，`deleted`/`merged` 是终态） | 先 `GET` 读回 `status`：已是 `draft` 就不必下架；终止态不可再走 lifecycle，要恢复只能新建 |
+| `invalid_status` | 生命周期用于已删除或已合并实体 | 先读取 state，终态不能再次应用生命周期操作 |
 | `invalid_merge_target` | 合并目标与源不同 kind／不同归属／不同父级，或目标未发布 | 只合并同一层级、同一容器里的重复建档，目标必须 `published` |
 | `forbidden`（403） | 角色不足：普通角色碰已发布条目、非管理员走 lifecycle、member 建关系或调 importer；**停用（`deleted`/`merged`）实体上的关联边删不掉也走这里** | 用 `catalog.entity.edit` 维护已发布条目；发布/合并/停用归 `catalog.lifecycle.manage`；悬空边清理属实例侧缺口，上报而不是反复重试 |
 | `authentication_required`（401） | **写端点**没有有效令牌（会话 / OAuth 令牌缺失或验签失败） | 核对本地凭据或重新登录；读端点返回 200 不代表写权限凭据有效 |

@@ -31,7 +31,7 @@ const all = [];
 for (const k of KINDS) {
   const items = await listKind(k);
   console.log(`${k}: ${items.length}`);
-  for (const it of items) all.push({ id: it.id, kind: k, title: it.title, status: it.status });
+  for (const it of items) all.push({ id: it.id, kind: k, title: it.title, status: it.state });
 }
 console.log("可见实体合计: " + all.length);
 

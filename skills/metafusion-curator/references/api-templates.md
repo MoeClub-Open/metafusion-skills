@@ -73,7 +73,7 @@ Agent 普通编辑使用 checkout 与 CatalogCommit，完整协议只维护在[�
 
 PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐字段核对。Track contents 可能因可见性被裁剪，不能把 GET 后整实体 PUT 说成能保全隐藏 contents；修改单条收录使用下文的专用 API。
 
-状态切换由端点与 DTO 决定，不提交 `action`：`POST /api/catalog/entities/{id}/lifecycle` 的 `LifecycleEdit` 无 `action`（`target_id` 有值时合并，无值时删除）；发布走实体 `PUT` 并设 `entity.status: "published"`，至少需要一条翻译；`POST /api/catalog/entities/{id}/unpublish` 只允许 `published → draft`，其 DTO 不含 `target_id`。
+条目没有发布状态。普通编辑使用 commit，免审权限才可调用下文旧单对象 DTO 示例；生命周期端点只做删除或合并。待审回执不是失败。
 
 本地 `mf-workspace` 与 `mf-track-content` 的 plan 字段和参数以各自 `--help` 为准。本页只维护服务端 API 请求形状；工具默认预览，执行开关不提供任务授权。
 
@@ -115,8 +115,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
           "ja": {"title": "新海誠"},
           "zh-CN": {"title": "新海诚", "aliases": ["Makoto Shinkai"]},
           "en-US": {"title": "Makoto Shinkai"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "根据官方作品页建立创作者主体",
@@ -144,8 +143,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
           "ja": {"title": "秒速5センチメートル"},
           "zh-CN": {"title": "秒速5厘米", "summary": "作品级简介", "body": "## 创作背景\n根据外部资料撰写条目说明。[^official]\n\n[^official]: https://example.org/official", "aliases": ["5cm/s"]},
           "en-US": {"title": "5 Centimeters per Second", "summary": "English summary"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "根据官方作品页建立创作母体",
@@ -172,8 +170,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         "translations": {
           "zh-CN": {"title": "第 1 话：樱花抄", "summary": ""},
           "en-US": {"title": "Episode 1: Cherry Blossom"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "根据官方分集目录建立内容单位",
@@ -196,8 +193,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         "translations": {
           "zh-CN": {"title": "第 1 话 正片母版"},
           "en-US": {"title": "Episode 1 master"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "按官方分集目录建立可复用表达",
@@ -231,8 +227,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         "translations": {
           "ja": {"title": "日本官方初版 Blu-ray"},
           "zh-CN": {"title": "日本官方初版蓝光", "summary": "单碟发行"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "根据发行方目录核对品番、日期与包装",
@@ -262,8 +257,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         "translations": {
           "zh-CN": {"title": "第 1 张蓝光"},
           "en-US": {"title": "Disc 1"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "按盒内实物顺序登记主载体",
@@ -295,8 +289,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
         "translations": {
           "zh-CN": {"title": "第 1 话：樱花抄"},
           "en-US": {"title": "Episode 1: Cherry Blossom"}
-        },
-        "status": "draft"
+        }
       },
       "expected_version": 0,
       "edit_note": "按蓝光目录建立第 1 轨并关联表达",
@@ -334,17 +327,15 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
 
 expected_version 来自 Track。PUT `/api/catalog/tracks/{id}/contents/{position}` 使用相同信封，URL 为回读的旧位置，inclusion.position 可以重排。DELETE 同路径只提交 expected_version/edit_note/sources；不要省略请求体。写后回读 Track、occurrences 与修订，409 时回读并合并；不要根据不可见记录的猜测位置操作。不可见收录或旧 position 无法核实时停止该项操作并报告未知。Track contents 来源省略规则见[API 行为参考](api-behavior.md)。
 
-### 单独修改状态（先核 OpenAPI 支持）
+### 提交审核与单条收录
 
-    PATCH /api/catalog/tracks/<track-uuid>/status
-    {
-      "status": "published",
-      "expected_version": 7,
-      "edit_note": "核对官方曲序与现有收录后发布",
-      "sources": [{"kind": "url", "citation": "官方曲序：支持已核对的 Track 发布状态", "url": "https://example.org/disc"}]
-    }
+普通提交返回 202 / pending_review / applied=false，保留同一 ID 等待审核，不回写模拟版本。只有免审提交立即生效。单条 Track 收录放入 operations：
 
-DTO 不含 `entity` 或 `contents`，服务端在事务内保留完整收录；`status` 仅接受 draft/pending_review/published，并遵循现有生命周期权限。已发布实体降级走 unpublish，不能借本端点绕过。缺端点不回退整实体 PUT。
+```json
+{"target":"entity","action":"content","id":"<track-uuid>","base_version":7,"content_change":{"action":"replace","position":0,"inclusion":{"expression_id":"<expression-uuid>","position":0,"locator":{}}},"source_refs":[{"source":"official"}]}
+```
+
+`content_change.action` 可为 add / replace / delete，删除省略 inclusion。位置必须来自可见记录，Track 整体版本冲突时重新核对，不猜隐藏收录位置。
 
 ## 关系
 

@@ -54,7 +54,7 @@ async function resolveTarget(id) {
   const r = await call("/api/catalog/entities/" + id);
   let out;
   if (r.status === 404) out = { id: id, resolution: "missing", http: 404 };
-  else if (r.status === 200 && r.body) out = { id: id, resolution: r.body.status === "deleted" ? "soft_deleted" : (r.body.status === "merged" ? "merged" : "exists_other"), http: 200, kind: r.body.kind, status: r.body.status, title: r.body.title };
+  else if (r.status === 200 && r.body) out = { id: id, resolution: r.body.state === "deleted" ? "soft_deleted" : (r.body.state === "merged" ? "merged" : "exists_other"), http: 200, kind: r.body.kind, status: r.body.state, title: r.body.title };
   else out = { id: id, resolution: "unresolved", http: r.status };
   resolved.set(id, out);
   return out;
@@ -95,7 +95,7 @@ for (const kind of KINDS) {
 }
 console.log("共 " + all.size + " 个可见实体；用时 " + ((Date.now() - t0) / 1000).toFixed(1) + "s");
 
-const label = (e) => ({ id: e.id, kind: e.kind, title: e.title, status: e.status });
+const label = (e) => ({ id: e.id, kind: e.kind, title: e.title, status: e.state });
 const titleOf = (id) => { const e = all.get(id); return e ? e.title : "(父级不可见)"; };
 
 // ===== 1. 缺封面 =====

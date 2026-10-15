@@ -22,7 +22,8 @@ description: MetaFusion 实体编目、查重、关系维护与数据质检。�
 - 创建先核可见 canonical 候选，保存 reviewed_candidate_ids；有候选只在来源证明不同身份后列为已审查。服务端按题名、各语言题名、外部 ID 和结构作用域复核，集合变化需重新审查。
 - 不同字段自动合并；同字段冲突须明确取舍再 rebase。未知推送保留同 ID、同载荷，先查回执；不能换 ID、重建计划、睡眠等全库稳定或盲目重试旧写接口。
 - 结构和关系提交已按事务并行。`transaction_busy` 尊重 Retry-After 后显式推送原提交；服务端只自动重试数据库确认回滚的事务，不把网络未知结果当失败。不要等待全库低峰或增加 Agent 绕过热点。
-- Track 元数据和状态用提交 patch，服务端保留完整收录。涉及隐藏收录时使用专用 contents 工具；删除、身份合并、下架、定义和文件操作按各自权限与事务维护。
+- 条目没有草稿或发布状态。`state` 仅表示 active/deleted/merged 生命周期；已生效条目 `review_status=reviewed`。普通提交返回 HTTP 202、`applied=false`、`review_status=pending_review`：这是已确认入队，不是失败；保留同 ID，等待审核并用回执查询结果，不能重新提交或把模拟版本写回本地。`catalog.review.bypass` 免审立即生效；`catalog.review.manage` 审核整笔提交。审核期间条目保持旧内容、旧版本和已审核标记。退回后可依据当前版本重新准备新提交。
+- Track 元数据使用 patch；单条收录可用 entity 的 `action=content` 与 `content_change={action:add|replace|delete,position,inclusion?}`，保留隐藏历史收录。关系删除使用 `target=relation,action=delete,id,base_version`；删除实体、身份合并、定义和文件操作按各自权限维护。
 
 ## 按需参考
 

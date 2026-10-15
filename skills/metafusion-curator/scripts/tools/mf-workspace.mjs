@@ -12,7 +12,7 @@ import {
 const API = "/api/catalog";
 const fields = {
   entity: new Set(
-    "title original_language translations attributes external_links pictures status content_unit_id parent_id position number contents subjects".split(
+    "title original_language translations attributes external_links pictures content_unit_id parent_id position number contents subjects".split(
       " ",
     ),
   ),
@@ -638,6 +638,13 @@ export async function runWorkspace(
     if (!state.pending || state.pending.id !== id)
       throw new Error("commit_not_pending");
     async function finalize(receipt) {
+      if (receipt?.applied === false && ["pending_review","reviewed"].includes(receipt.review_status) &&
+          ["pending","rejected"].includes(receipt.review_decision) && validReceipt(receipt,commit,false)) {
+        save(safeFile(root, `.mf/receipts/${id}.json`), receipt);
+        state.pending.outcome = receipt.review_decision === "rejected" ? "rejected" : "pending_review";
+        save(stateFile,state);
+        return {ok:true,applied:false,queued:receipt.review_status==="pending_review",reason:receipt.review_decision==="rejected"?"review_rejected":"pending_review",receipt};
+      }
       if (!validReceipt(receipt, commit)) {
         state.pending.outcome = "unknown";
         save(stateFile, state);
@@ -732,8 +739,8 @@ export async function runWorkspace(
       if (!["conflict", "rejected"].includes(state.pending.outcome))
         throw new Error("unknown_push_requires_receipt_same_id");
       const receipt = await requestFn(`${API}/commits/${id}`);
-      if (receipt.status === 200) return finalize(receipt.body);
-      if (receipt.status !== 404) throw new Error("receipt_unavailable");
+      if (receipt.status === 200 && receipt.body?.review_decision !== "rejected") return finalize(receipt.body);
+      if (receipt.status !== 404 && !(receipt.status===200 && receipt.body?.review_decision==="rejected")) throw new Error("receipt_unavailable");
       evidenceEligible(commit.sources, origin, blockedHosts);
       for (const e of state.entries)
         if (!same(read(fileFor(e)), sealed.snapshots[e.file]))
@@ -902,7 +909,7 @@ export async function runWorkspace(
       body: commit,
       tries: 1,
     });
-    if (pushed.status === 200) return finalize(pushed.body);
+    if (pushed.status === 200 || pushed.status === 202) return finalize(pushed.body);
     // This specific 503 certifies rollback of this request. It cannot resolve
     // an earlier lost response: another same-ID request may still be in flight.
     if (!previouslyUnknown && pushed.status === 503 &&

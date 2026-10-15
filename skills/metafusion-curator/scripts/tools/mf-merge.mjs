@@ -59,8 +59,8 @@ async function handlePair(kind, keepId, loseId, scopeNote) {
   const keep = await getEntityRetry(keepId);
   const lose = await getEntityRetry(loseId);
   if (!keep || !lose) { skipped += 1; log.push({ kind, keepId, loseId, result: "skip: 实体不存在" }); return; }
-  if (keep.status === "merged" || lose.status === "merged") { skipped += 1; log.push({ kind, keepId, loseId, result: "skip: 已合并（幂等）" }); return; }
-  if (keep.status !== "published") { skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 保留方 status=${keep.status}（须 published）` }); return; }
+  if (keep.state === "merged" || lose.state === "merged") { skipped += 1; log.push({ kind, keepId, loseId, result: "skip: 已合并（幂等）" }); return; }
+  if (keep.state !== "active") { skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 保留方 status=${keep.state}（须 active）` }); return; }
 
   const note = scopeNote ?? `${kind} 同作用域`;
   if (kind !== "work" && kind !== "agent" && kind !== "collection") {
@@ -112,9 +112,9 @@ if (MERGE) {
     for (const grp of groups) {
       const live = [];
       for (const it of grp.items ?? []) {
-        if (it.status && it.status !== "published") continue;
+        if (it.state && it.state !== "active") continue;
         const e = await getEntityRetry(it.id);
-        if (e && e.status === "published") live.push(e);
+        if (e && e.state === "active") live.push(e);
       }
       if (live.length < 2) { skipped += 1; continue; }
       const keep = pickKeeper(live);

@@ -23,7 +23,7 @@ const FIELD_KEYS = new Set([
 const SAFE_FIELD_TYPES = new Set(["group", "list", "number", "text", "boolean", "date", "url", "multilingual"]);
 const FIELD_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const RESERVED_FIELD_CODES = new Set([
-  "id", "kind", "version", "status", "created_by", "work_id", "parent_id", "release_id", "medium_id",
+  "id", "kind", "version", "status", "state", "review_status", "created_by", "work_id", "parent_id", "release_id", "medium_id",
   "content_unit_id", "contents", "subjects", "redirect_id",
 ]);
 const ENTITY_KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track"]);

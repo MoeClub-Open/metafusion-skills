@@ -93,6 +93,24 @@ function fixture(t) {
   return { dir, id, docs, receipts, calls, fn, opts, read, edit, seal };
 }
 
+test("pending review is confirmed acceptance and never adopts simulated versions or resends", async (t) => {
+  const f=fixture(t);await f.seal();const before=f.read(`entities/${f.id}.json`);let writes=0;
+  const requestFn=async (p,o={}) => {
+    if(p.endsWith("/commits")) {
+      writes++;
+      const receipt={id:o.body.id,applied:false,review_status:"pending_review",review_decision:"pending",refs:{},
+        items:o.body.operations.map(op=>({target:op.target,id:op.id,version:2,changed:true,merged:false}))};
+      f.receipts.set(receipt.id,receipt);return {status:202,body:receipt};
+    }
+    return f.fn(p,o);
+  };
+  const out=await runWorkspace("push",{...f.opts,requestFn,apply:true});
+  assert.equal(out.ok,true);assert.equal(out.queued,true);assert.equal(out.applied,false);
+  assert.deepEqual(f.read(`entities/${f.id}.json`),before);assert.equal(f.docs.get(f.id).version,1);
+  const recovered=await runWorkspace("receipt",{...f.opts,requestFn});
+  assert.equal(recovered.queued,true);assert.equal(writes,1);
+});
+
 test("article edits preserve other locales and structured fields through commit and push", async (t) => {
   const f = fixture(t);
   const original = f.docs.get(f.id);

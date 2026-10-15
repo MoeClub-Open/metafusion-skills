@@ -79,3 +79,7 @@ node mf-workspace.mjs receipt --dir "$MF_TASK_DIR/catalog" --resolutions "$MF_TA
 `mf-merge` 并集改变翻译题名或外部 ID 时，也会按最终并集及其作用域复核完整 canonical 候选。保留方及指向它的历史别名排除；调用者明确选择且已核来源的重复对可认可被合并方。出现第三个 canonical 身份时，工具在任何写入前返回 `identity_review_required` 与候选详情；核对来源后，可用 `--reviews "$MF_TASK_DIR/identity-reviews.json"` 中的 `{"entity:<保留方UUID>":["<已核第三候选UUID>"]}` 明确补充审查。截断、未解析或错作用域均停止；并发 `identity_candidates_changed` 不继续删关系边或 lifecycle 合并。
 
 协议、权限与容量限制以实例 [OpenAPI](/api/openapi.json) 和[公开提交文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md)为准。当前没有原生 git remote、服务端长期分支或跨服务事务。
+
+## 提交审核
+
+HTTP 202 / pending_review 是持久接收回执，`applied=false` 表示尚未改动事实，不是重试依据。免审提交立即生效；一般提交等待审核后查询相同 ID。审核通过原子应用并保留原作者；退回不改条目。旧发布状态不再可写。待审新实体的 refs 是预留 ID，通过前不能当成已存在实体。
