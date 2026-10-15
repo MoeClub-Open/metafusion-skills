@@ -22,7 +22,7 @@ Windows PowerShell 示例：`$env:MF_TASK_DIR = Join-Path $env:TEMP ("metafusion
 
 先核 OpenAPI、definitions 与事实来源。`commit` 只写本地不可变请求，自动按对象键生成稀疏 patch，并为每条来源补唯一 `key`、给每个操作挂上 `source_refs`（服务端必填，旧格式会 `source_refs_required`）；数组整体比较，不能以数组下标代表事实身份。遗漏对象键保留线上原值，`status/commit` 会列出 `ignored_omissions`；只有遗漏而没有其他改动时不封存提交。要删除一个已有键，先从工作文件移除它，再给 `commit` 明确传 `--remove 'entity:<UUID>:/attributes/<key>'`（关系用 `relation:<UUID>:/attributes/<key>`，可重复）。路径必须存在于基线且已从工作文件移除；未知动态字段仍由 `preview` 核验。`null` 是明确赋值，数组缩减是完整数组替换。`preview` 运行真实服务端校验后整笔回滚。`push --apply` 执行已获任务授权的写入，开关本身不是授权。
 
-修改实体 `/title`、`/external_ids` 及子路径、整组 `/translations`、整行 `/translations/<locale>` 或翻译题名时，先重新查询身份候选，再通过 `--reviews` 文件提供 `{"entity:<UUID>":["<已复核的 canonical UUID>"]}`；零候选也明确写 `[]`。更新时过滤当前实体自身和 canonical 指向当前实体的历史别名，只列其他候选。仅改译文摘要或别名子路径无需该数组，非身份更新附带数组会被拒绝。候选不等于重复；必须核来源确认候选身份后才列入数组。
+修改实体 `/title`、`/external_links` 及子路径、整组 `/translations`、整行 `/translations/<locale>` 或翻译题名时，先重新查询身份候选，再通过 `--reviews` 文件提供 `{"entity:<UUID>":["<已复核的 canonical UUID>"]}`；零候选也明确写 `[]`。更新时过滤当前实体自身和 canonical 指向当前实体的历史别名，只列其他候选。仅改译文摘要或别名子路径无需该数组，非身份更新附带数组会被拒绝。候选不等于重复；必须核来源确认候选身份后才列入数组。
 
 来源只接受形状合法的 `url/publication`；`self` 和当前工作区实例域名、`MF_API_ORIGIN/MF_BASE` 域名及 `findverse.cc`（含子域）返回 `source_not_eligible`。可用重复 `--blocked-host` 补充本地黑名单。`publication` 可引用实际读取的纸质资料，不可把无法读取的网页改名为出版物规避校验；格式通过仍不证明来源支持事实。
 

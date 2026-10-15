@@ -139,13 +139,40 @@ const j = (v) => JSON.stringify(canonical(v ?? null));
  * 依据：同键异值的外部标识说明两侧各自指向不同真实对象（同名≠同一物）；
  * duration/版次类属性不同说明是不同物或不同版次。
  */
+
+/** external_links 数组工具：按 kind+url 识别，external_id 作身份比对。 */
+export function linkIdentityValue(link) {
+  if (!link || typeof link !== "object") return "";
+  return String(link.external_id || link.url || "").trim();
+}
+export function linksByKind(links) {
+  const out = new Map();
+  for (const link of Array.isArray(links) ? links : []) {
+    if (!link?.kind) continue;
+    const list = out.get(link.kind) || [];
+    list.push(link);
+    out.set(link.kind, list);
+  }
+  return out;
+}
+export function linksToCriteria(links) {
+  return (Array.isArray(links) ? links : [])
+    .map((link) => ({
+      kind: link.kind,
+      value: linkIdentityValue(link),
+    }))
+    .filter((c) => c.kind && c.value);
+}
+
 export function identityConflicts(keep, lose) {
   const out = [];
+  const keepBy = linksByKind(keep.external_links);
+  const loseBy = linksByKind(lose.external_links);
   for (const k of IDENTITY_KEYS) {
-    const a = keep.external_ids?.[k];
-    const b = lose.external_ids?.[k];
-    if (a != null && b != null && String(a) !== String(b))
-      out.push(`external_ids.${k}`);
+    const aVals = new Set((keepBy.get(k) || []).map(linkIdentityValue).filter(Boolean));
+    const bVals = new Set((loseBy.get(k) || []).map(linkIdentityValue).filter(Boolean));
+    if (aVals.size && bVals.size && ![...aVals].some((v) => bVals.has(v)))
+      out.push(`external_links.${k}`);
   }
   for (const k of IDENTITY_ATTRS) {
     const a = keep.attributes?.[k];
@@ -165,7 +192,7 @@ export function identityConflicts(keep, lose) {
 /**
  * 并集候选：把 lose 侧独有的值并入 keep；conflicts 非空时实际合并拒绝。
  * pictures 取并集；translations 语种内**逐键**并集；attributes 数组并集/对象浅并集；
- * external_ids 按键并集；track 的 contents 按 expression_id + locator 区分收录。
+ * external_links 按键并集；track 的 contents 按 expression_id + locator 区分收录。
  * 返回 { entity, changes, conflicts } —— conflicts 是"同键异值、保留本方"的项（会写进 edit_note）。
  */
 export function unionInto(keep, lose, { kind } = {}) {
@@ -232,15 +259,30 @@ export function unionInto(keep, lose, { kind } = {}) {
   );
   if (attrTouched.length) changes.push(`attributes~${attrTouched.join("/")}`);
 
-  const ext = { ...(keep.external_ids ?? {}) };
-  for (const [k, v] of Object.entries(lose.external_ids ?? {})) {
-    if (!(k in ext)) ext[k] = v;
-    else if (String(ext[k]) !== String(v)) conflicts.push(`external_ids.${k}`);
+  const ext = [...(Array.isArray(keep.external_links) ? keep.external_links : [])];
+  const seen = new Set(ext.map((l) => `${l.kind}\0${l.url}`));
+  const keepBy = linksByKind(keep.external_links);
+  const extAdded = [];
+  for (const link of Array.isArray(lose.external_links) ? lose.external_links : []) {
+    if (!link?.kind || !link?.url) continue;
+    const key = `${link.kind}\0${link.url}`;
+    if (seen.has(key)) {
+      if (j(ext.find((value) => `${value.kind}\0${value.url}` === key)) !== j(link))
+        conflicts.push(`external_links.${link.kind}`);
+      continue;
+    }
+    const existing = keepBy.get(link.kind) || [];
+    if (existing.length) {
+      conflicts.push(`external_links.${link.kind}`);
+      continue;
+    }
+    if (!existing.length) {
+      ext.push(link);
+      seen.add(key);
+      extAdded.push(link.kind);
+    }
   }
-  const extAdded = Object.keys(ext).filter(
-    (k) => !(k in (keep.external_ids ?? {})),
-  );
-  if (extAdded.length) changes.push(`external_ids+${extAdded.join("/")}`);
+  if (extAdded.length) changes.push(`external_links+${extAdded.join("/")}`);
 
   let contents = keep.contents;
   if (kind === "track") {
@@ -269,7 +311,7 @@ export function unionInto(keep, lose, { kind } = {}) {
     entity: {
       translations: tr,
       attributes: attrs,
-      external_ids: ext,
+      external_links: ext,
       pictures: pics,
       ...(kind === "track" ? { contents } : {}),
     },
@@ -395,7 +437,7 @@ export async function mergeEntity({
     const review = await findIdentity({
       kind, ...scope,
       titles: [mergedEntity.title, ...Object.values(mergedEntity.translations ?? {}).map((t) => t?.title).filter(Boolean)],
-      externalIds: Object.entries(mergedEntity.external_ids ?? {}).map(([provider, value]) => ({ provider, value })),
+      externalIds: linksToCriteria(mergedEntity.external_links),
     });
     if (!review.coverage.complete || review.unknown.length || review.errors.length)
       return result(false, "identity_review_unverified", { identity_review: review });

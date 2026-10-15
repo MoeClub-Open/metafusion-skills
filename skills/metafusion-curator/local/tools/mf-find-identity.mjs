@@ -60,7 +60,7 @@ function validateInput({
 
   const titleValues = [...titles].map(cleanText).filter(Boolean);
   const externalValues = [...externalIds].map((item) => ({
-    provider: cleanText(item?.provider),
+    provider: cleanText(item?.kind ?? item?.provider),
     value: cleanText(item?.value),
   }));
   const attributeValues = [...attributes].map((item) => ({
@@ -154,14 +154,16 @@ function matchReasons(entity, query) {
   }
 
   for (const criterion of query.externalIds) {
-    const actual = entity.external_ids?.[criterion.provider];
-    if (typeof actual === "string" && actual === criterion.value) {
+    const links = Array.isArray(entity.external_links) ? entity.external_links : [];
+    const hit = links.find((link) => link.kind === (criterion.kind || criterion.provider) &&
+      (link.external_id === criterion.value || link.url === criterion.value));
+    if (hit) {
       addReason(reasons, {
         query_mode: "external_id_exact",
-        provider: criterion.provider,
+        provider: criterion.kind || criterion.provider,
         query_value: criterion.value,
-        matched_field: "external_ids." + criterion.provider,
-        matched_value: actual,
+        matched_field: "external_links." + (criterion.kind || criterion.provider),
+        matched_value: hit.external_id || hit.url,
         match_method: "exact_value",
         strength: "identifier_candidate",
       });
@@ -227,10 +229,7 @@ function candidateEntity(entity) {
       entity.attributes && typeof entity.attributes === "object"
         ? entity.attributes
         : {},
-    external_ids:
-      entity.external_ids && typeof entity.external_ids === "object"
-        ? entity.external_ids
-        : {},
+    external_links: Array.isArray(entity.external_links) ? entity.external_links : [],
   };
 }
 
@@ -308,7 +307,10 @@ export async function findIdentity({
       body: {
         kind: query.kind,
         titles: query.titles,
-        external_ids: query.externalIds,
+        external_links: (query.externalIds || []).map((c) => ({
+          kind: c.kind || c.provider,
+          value: c.value,
+        })),
         attributes: query.attributes,
         ...(query.workId ? { work_id: query.workId } : {}),
         ...(query.releaseId ? { release_id: query.releaseId } : {}),
