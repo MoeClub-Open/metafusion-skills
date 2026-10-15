@@ -7,9 +7,12 @@ description: MetaFusion 实体编目、查重、关系维护与数据质检。�
 
 ## 入口
 
-有云端 MCP 时，读取 `metafusion://skills/curator` 或调用 `metafusion_reference`，使用 `metafusion_api_contract` 与 `metafusion_api_call` 操作平台；提交、文件处理见[云端操作](references/cloud.md)。云端模式不要求终端、Node.js、Python 或本地文件系统。
+两种运行方式，契约同源，按环境选一种（也可以并用）：
 
-在 `scripts/tools/` 使用 `mf-source` 检索来源、`mf-platform` 只读目录、`mf-workspace` 管理本地副本与 commit/push、`mf-definitions` upsert 词项或受控新增单个字段。参数查工具帮助；[工具索引](scripts/tools/README.md)，[凭据配置](scripts/README.md)。
+- **云端 MCP**：读取 `metafusion://skills/curator` 或调用 `metafusion_reference`，用 `metafusion_api_contract` 读契约、`metafusion_api_call` 调接口；提交与文件处理见[云端操作](references/cloud.md)。不要求终端、Node.js、Python 或本地文件系统。
+- **本地工具**：在 `scripts/tools/` 使用 `mf-source` 检索来源、`mf-platform` 只读目录、`mf-workspace` 管理本地副本与 commit/push、`mf-definitions` upsert 词项或受控新增单个字段。参数查工具帮助；[工具索引](scripts/tools/README.md)，[凭据配置](scripts/README.md)。
+
+两种方式都不等于写入授权：是否允许写入由用户对具体任务授权。需要一段可直接复制给 Agent 的启动提示词时，用仓库 [README 的「给 Agent 的提示词」](../../README.md#给-agent-的提示词)。
 
 外部信息获取由 Agent 自行规划：自行选择检索工具、来源、顺序及证据取舍。平台工具与本技能描述数据契约、质量要求和操作方法，不接管检索流程，不主动发现或选择外部来源。
 
