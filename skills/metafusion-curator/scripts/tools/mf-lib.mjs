@@ -387,7 +387,7 @@ export async function mergeEntity({
   ]);
   if (!currentKeep || !currentLose)
     return result(false, "实体对当前调用者不可见或不存在");
-  if (currentLose.status === "merged") return result(true, "already-merged");
+  if (currentLose.state === "merged") return result(true, "already-merged");
   if (
     currentKeep.version !== keep.version ||
     currentLose.version !== lose.version
@@ -396,8 +396,8 @@ export async function mergeEntity({
   if (
     kind !== currentKeep.kind ||
     kind !== currentLose.kind ||
-    currentKeep.status !== "published" ||
-    ["deleted", "merged"].includes(currentLose.status)
+    currentKeep.state !== "active" ||
+    ["deleted", "merged"].includes(currentLose.state)
   )
     return result(false, "invalid_kind_or_status");
   if (
@@ -611,10 +611,10 @@ async function writable(entity) {
   return writableEntity(entity);
 }
 
-/** 从重复组里挑保留方：published 优先，其次字段更全。 */
+/** 从重复组里挑保留方：正常条目优先，其次字段更全。 */
 export function pickKeeper(entities) {
   const score = (e) =>
-    (e.status === "published" ? 1000 : 0) +
+    (e.state === "active" ? 1000 : 0) +
     Object.keys(e.translations ?? {}).length * 5 +
     Object.keys(e.attributes ?? {}).length * 3 +
     (e.pictures ?? []).length * 2 +

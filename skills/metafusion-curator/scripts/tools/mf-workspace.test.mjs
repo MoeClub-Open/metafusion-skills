@@ -24,7 +24,7 @@ function fixture(t) {
           attributes: { language: "ja" },
           translations: { en: { title: "base" } },
           pictures: [],
-          status: "draft",
+          state: "active", review_status: "reviewed",
         },
       ],
     ]),

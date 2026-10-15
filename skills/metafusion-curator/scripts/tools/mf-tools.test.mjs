@@ -32,7 +32,7 @@ const entity = (id, extras = {}) => ({
   kind: "work",
   title: "Same",
   version: 4,
-  status: "published",
+  state: "active", review_status: "reviewed",
   translations: { "en-US": { title: "Same" } },
   attributes: { tags: ["song"] },
   external_links: [{ kind: "isrc", url: "mf://external/isrc/USAAA2600001", external_id: "USAAA2600001" }],
@@ -103,7 +103,7 @@ function mergeFixture(
         ? new Response(null, { status: 204 })
         : json({ error: "version_conflict" }, deleteStatus);
     }
-    if (method === "POST") return json({ ...lose, status: "merged" });
+    if (method === "POST") return json({ ...lose, state: "merged" });
     if (path.endsWith(`${keep.id}/relations`)) return json({ items: keepRels });
     if (path.endsWith(`${lose.id}/relations`)) return json({ items: loseRels });
     if (path.endsWith(`/${keep.id}`))
@@ -206,7 +206,7 @@ test("收录并集保留同一表达的不同定位并避免位置冲突", () =>
 test("合并身份并集复核完整候选并排除保留方 canonical aliases", async () => {
   const keep = entity(randomUUID()),
     lose = entity(randomUUID(), { external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] }),
-    alias = entity(randomUUID(), { status: "merged" });
+    alias = entity(randomUUID(), { state: "merged" });
   const calls = mergeFixture(keep, lose, { candidateRows: [
     { matched: keep, canonical: keep }, { matched: alias, canonical: keep }, { matched: lose, canonical: lose },
   ] });
@@ -583,7 +583,7 @@ const expr = (id, extras = {}) => ({
   kind: "expression",
   title: "DRIVE US CRAZY",
   version: 2,
-  status: "published",
+  state: "active", review_status: "reviewed",
   translations: { "ja-JP": { title: "DRIVE US CRAZY" } },
   attributes: {},
   external_links: [],

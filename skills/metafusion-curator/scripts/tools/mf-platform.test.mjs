@@ -11,7 +11,7 @@ const entity = {
   id: "work-id",
   kind: "work",
   title: "work",
-  status: "published",
+  state: "active", review_status: "reviewed",
   version: 2,
 };
 test("platform is read-only and old mutation plans fail before any HTTP", async () => {
@@ -37,6 +37,14 @@ test("platform is read-only and old mutation plans fail before any HTTP", async 
   );
 });
 test("closed read plan schema rejects arbitrary methods and filter pagination", () => {
+  assert.equal(
+    validatePlan({ action: "entity.list", params: { state: "active" } }),
+    null,
+  );
+  assert.equal(
+    validatePlan({ action: "entity.list", params: { status: "published" } }),
+    "invalid_list_params",
+  );
   assert.equal(
     validatePlan({ action: "entity.get", id: "id", method: "PUT" }),
     "invalid_plan",
@@ -77,7 +85,7 @@ test("GET verifies identity and canonical state", async () => {
         {
           requestFn: async () => ({
             status: 200,
-            body: { ...entity, status: "merged" },
+            body: { ...entity, state: "merged" },
           }),
         },
       )

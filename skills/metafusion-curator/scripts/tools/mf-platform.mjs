@@ -20,7 +20,7 @@ const ACTIONS = [
   "contract",
 ];
 const FILTERS = new Set(
-  "kind kinds q status work_id content_unit_id release_id medium_id parent_id field value tags original_language has_pictures sort order locale".split(
+  "kind kinds q state work_id content_unit_id release_id medium_id parent_id field value tags original_language has_pictures sort order locale".split(
     " ",
   ),
 );
@@ -33,7 +33,7 @@ const entity = (x, id) =>
   Number.isSafeInteger(x.version) &&
   x.version > 0 &&
   typeof x.title === "string" &&
-  typeof x.status === "string";
+  ["active", "deleted", "merged"].includes(x.state);
 export function listOperations() {
   return ACTIONS.map((action) => ({
     action,
@@ -185,7 +185,7 @@ export async function runPlan(plan, { requestFn = apiRequest } = {}) {
     plan.action === "entity.get"
       ? entity(r.body, plan.id)
       : plan.action === "entity.resolve"
-        ? entity(r.body) && r.body.status !== "merged" && !r.body.redirect_id
+        ? entity(r.body) && r.body.state !== "merged" && !r.body.redirect_id
         : plan.action === "definitions"
           ? record(r.body?.document) && typeof r.body.etag === "string"
           : plan.action === "contract"

@@ -6,6 +6,7 @@ const LOCAL_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CREDENTIALS = join(LOCAL_DIR, "credentials.json");
 const API_PREFIX = "/api/";
 const READ_ONLY_ENTITY_FIELDS = new Set([
+  "status", "state", "review_status",
   "created_by",
   "redirect_id",
   "updated_at",
