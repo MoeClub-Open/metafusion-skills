@@ -12,7 +12,7 @@
     ]
   },
   "include": [
-    "skills/**/*.ts"
+    "skills/*/scripts/**/*.ts"
   ],
   "exclude": [
     "**/*.test.ts"

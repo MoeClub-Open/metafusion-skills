@@ -4,6 +4,8 @@
 
 本地工具使用 Node.js 24+ 原生运行 TypeScript；完整复制技能目录并保留上级 `package.json`。不提供 JavaScript 包装器或编译产物。仓库开发校验使用 `bun install --frozen-lockfile`、`bun run typecheck` 与 `bun run test`。
 
+任务中新增的 Node 脚本也使用 `.ts`，通过 `node <脚本>.ts` 直接运行；导入使用当前技能目录中的 TypeScript 工具路径，不复制旧客户端。中间脚本放独立任务目录，不能放进技能安装目录。
+
 ## 凭据
 
 本目录 `credentials.json` 已忽略：`{"baseUrl":"https://example.com","pat":"<本机填写>"}`。
