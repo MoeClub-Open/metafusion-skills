@@ -8,7 +8,9 @@ description: 选择 MetaFusion 实体层级、命名作品与发行版、判断�
 读写工具见 [metafusion-curator](../metafusion-curator/SKILL.md)；结构细节见 [数据模型](../metafusion-curator/references/data-model.md)。
 
 - **Work** 保存创作身份与正式题名。Season、Vol、OST 等是否属于题名按官方证据判断，不机械删词；出版社、品番、规格、包装放发行侧。
+- 中文译名仅在[官方或授权本地化来源支持](../metafusion-curator/references/source-policy.md#中文译名)时录入；没有就保留原名，原语言资料不要求另配中文译名。非官方译名不能混入无标记的题名或别名。
 - **ContentUnit** 是同 Work 的逻辑章/集；**Expression** 是正文、译文、录音等可复用表达。现场、伴奏、重录、混音先核内容身份；不因同名或时长近似合并，也不为挂署名复制表达。
+- 品番、地区或收录位置不证明独立录音/母版，不把商品名写成录音的 `version_label`。商品页仅有曲名时不能据此声明 SKU 专属录音；证据不足先保留已确认收录对象与待核缺口。
 - **Release** 对应真实版次；普通、限定、地区、数字、再版按实际差异区分。购买渠道本身不制造版次；版本组须有明确来源，不从共同 subjects 推断。
 - **Medium/Track** 按实际包装与目录建立；`number` 保留官方编号，`position` 表示顺序。同一表达跨发行复用 `Track.contents`。
 - 歌曲可有独立 Work，单曲发行是 Release。专辑组成用当前启用关系，歌曲不改挂专辑；发行 subjects 覆盖实际收录 Work。

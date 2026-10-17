@@ -12,6 +12,7 @@
 常见语义误用：
 
 - `soundtrack_of` 默认是 OST Work → 被配乐的 Work；`cover_of`/`translation_of` 默认连接 Expression。按来源与当前定义核方向，不以同名判断。
+- 作词、作曲通常归歌曲 Work；某次录音的编曲、制作、录音及混音按来源归对应 Expression，并保留必要的发行 `context`。共同署名逐人建边；有准确关系时优先使用，通用参与关系保留 `credit_role` 职位原文，不能把只在某版注明的署名泛化到全部版本。
 - `pressing_of` 表示再版自，不表示收录；Track 收录用 contents，Release 声明 Work 用 subjects。
 - `store_bonus_for` 默认目标为店铺 Agent，不是发行；`credit_role` 表示署名职位，不能替代结构归属。
 - 默认关系若不能表达某轨编曲者、某盘指挥或篇目改编，按 [定义扩展](model-gaps.md) 判断准确落点；不能为挂署名复制 Expression，或改挂 Work。

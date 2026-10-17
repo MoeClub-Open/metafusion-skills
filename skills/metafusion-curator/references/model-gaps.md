@@ -34,7 +34,7 @@
 - 八种 kind 与归属外键不能靠 GUI 扩展；普通 PUT 不改 kind/work_id/release_id/medium_id。迁移归属须按授权重建并处理引用；没有实体 DELETE。
 - 表达组合、跨 Work 收录、发行版本组已有模型，见 [数据模型](data-model.md)，不要作为缺口重造结构。
 - deleted/merged 源端不可编辑，DeleteRelation 会受源端权限阻断；仅目标端终态时管理员可能可删除。必要边整理在生命周期转换前完成，失败停止。
-- entity 引用须可见；列表按调用者过滤，自己的草稿可见不代表可引用他人隐藏草稿。分页期间并发修改会移动边界，按 ID 去重不等于同一快照。
-- Import 的 entity_type 限 work/artist/organization/character；Bangumi Preview 同样校验，DLsite/DMM 商品 Preview 返回 work、不按该参数分支。其它鉴权与服务边界见 [接口范围](endpoint-scope.md)。
+- entity 引用须可见；实体无草稿状态，待审核的是提交，不能把尚未应用的创建作为已存在对象引用。分页期间并发修改会移动边界，按 ID 去重不等于同一快照。
+- 外部来源适配器只读，预览与查询不自动创建目录事实；旧导入写接口已移除。其它鉴权与服务边界见 [接口范围](endpoint-scope.md)。
 
 质检使用 [仓内工具](../scripts/tools/README.md) 与 [检查清单](qa-checklist.md)；空 subjects/medium 或允许入库不证明内容链完整。

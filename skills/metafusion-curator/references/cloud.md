@@ -10,6 +10,7 @@ MCP 使用独立委托凭据，不占个人 API Key 额度；缩减权限不新�
 
 - `metafusion_api_contract`：当前目录 OpenAPI；动态字段另读 `/api/catalog/definitions`。
 - `metafusion_reference`：读取技能与链接的 reference 文档，或 `source=docs, path=docs/api-storage.md` 等公开 API 手册；返回部署锁定的版本。
+- 返回的 `revision` 是实际读取的技能或文档修订；记录它以便核查指引差异。提交或推送技能仓库不会自动更新云端引用，发布时须同步部署版本锁，之后回读核验实际修订与内容。
 - `metafusion_api_call`：按现有 HTTP API 传 method、path、query、body、headers；JSON、base64 和 multipart 均可，不需要客户端执行环境。包含搜索、实体、关系、定义、外部来源只读查询、通知、互动、文件及已授权的管理操作。
 - 原生状态码、冲突、Retry-After 和回执保留。API 查询分页按原契约继续；一次响应不意味着关系全集。
 

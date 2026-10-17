@@ -20,7 +20,9 @@ description: MetaFusion 实体编目、查重、关系维护与数据质检。�
 
 - 开始实例操作时核 OpenAPI 与 definitions；字段、关系、词项使用当前启用定义。
 - 查重核 kind、内容身份、父级作用域与 canonical ID；同名或同 Work 不证明同一 Expression。正式题名不机械清洗。
+- 中文译名须有官方或授权本地化证据；无证保留原名，不自行翻译、音译或把社区译名写成中文题名/别名。非官方译名的标记条件见[来源策略](references/source-policy.md#中文译名)，不要为补齐语言资料而造名。
 - Release `subjects` 声明 Work，Track `contents` 引用 Expression；先声明 subjects，再补收录。
+- 商品页曲目表只能证明收录，品番不证明独立录音或母版；补全或审查条目时按[质检清单](references/qa-checklist.md)核对来源事实覆盖，不能以结构检查 `complete` 代替语义验收。
 - 普通实体/关系编辑只走变更集：checkout → 构造修改 → commit → preview → push → 回执与展示核验，不调用旧整实体 PUT 工具。云端用 MCP 封存提交；本地模式使用系统临时目录下的独立任务工作区，所有中间脚本、草稿、查询与输出均放任务目录，不写入本仓库；[提交与恢复](references/workflow.md)。**提交证据必填：** 每条 source 要有唯一 `key`，每个操作要有 `source_refs`；旧格式会被 `source_refs_required` 拒绝（见[载荷模板](references/api-templates.md#变更集信封)）。本地 `mf-workspace commit` 会自动补 key/source_refs；MCP 手写载荷必须自己写全。
 - 创建先核可见 canonical 候选，保存 reviewed_candidate_ids；有候选只在来源证明不同身份后列为已审查。服务端按题名、各语言题名、外部 ID 和结构作用域复核，集合变化需重新审查。
 - 不同字段自动合并；同字段冲突须明确取舍再 rebase。未知推送保留同 ID、同载荷，先查回执；不能换 ID、重建计划、睡眠等全库稳定或盲目重试旧写接口。

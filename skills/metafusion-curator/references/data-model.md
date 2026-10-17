@@ -27,7 +27,8 @@ Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文�
 - contents.position 在该 Track 内唯一；兄弟 Track.position 服务端不保证唯一，曲序需另核。
 - Release.subjects 声明全部收录 Expression 所属 Work；遗漏会 `undeclared_release_subject`。role 取当前启用 release_role，(work_id,role) 不重复。
 - `track_work` 是 release_role 词项，不是 relation；仅启用时表示发行中作为曲目收录的 Work（可含已证实影音作品）。词项结构 names/enabled，不虚构 description/source/metadata；role 不能替代 Expression 收录。
-- subjects/medium 可为空而入库，但不等于收录完整。先写 subjects，再补 Track.contents；跨实体不原子，失败核已提交部分。
+- 正常收录的曲目不能标成 `supplement` 特典作品；缺准确 role 时按[定义扩展](model-gaps.md)处理，不借近似词项通过校验。
+- subjects/medium 可为空而入库，但不等于收录完整。先声明 subjects，再补 Track.contents；同一 commit 原子维护，跨批次失败核已提交部分。
 - attributes 受当前 enabled/applicable_kinds 与词表约束，没有实体 types；细节见 [字段](types-and-fields.md)。
 
 ## 条目正文
