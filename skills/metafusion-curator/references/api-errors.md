@@ -71,7 +71,7 @@
 | `constraint_violation` | 数据库完整性约束冲突，如跨 Work/Release/Medium 的父子 | 父子只能在同一归属域；按当前 definitions 与实际冲突核查，不能通过改 position 伪造关系身份 |
 | `locator: unknown_field: <键>` | `locator` 里写了未声明的子键 | 只写定义声明的子字段 |
 | `locator: anchor_required: relative_to` | `locator` 填了子字段却没给锚点 | 有页码/时间码/路径时必须给 `relative_to`（`locator_reference` 词表：`medium` / `track`） |
-| `invalid_reference` | 被引用实体不存在／kind 不符／**不可见**／已 `deleted`/`merged` | 引用目标必须可见（`published`）；先读该实体确认；合并过的先 `/resolve` |
+| `invalid_reference` | 被引用实体不存在／kind 不符／不可见／已 deleted 或 merged | 读取并核对目标；合并过的先 `/resolve`，待审创建还不是当前条目 |
 
 ## 关系
 
@@ -98,8 +98,8 @@ A→B 与 B→A 可能都被服务器接受；同一事实的反向展示不需�
 | `version_conflict`（409） | 实体/关系的 `expected_version` 不匹配，或 definitions 的 `expected_etag` 缺失/不匹配 | 回读完整目标，确认并发改动后再决定是否基于当前状态重做；客户端不得自动重放 mutate。关系删除不带版本也走这里 |
 | `use_lifecycle_endpoint` | 在普通事实写入中声明终态或重定向 | 实体删除与合并使用 `POST /api/catalog/entities/{id}/lifecycle`；普通编辑通过提交，不写状态 |
 | `invalid_status` | 生命周期用于已删除或已合并实体 | 先读取 state，终态不能再次应用生命周期操作 |
-| `invalid_merge_target` | 合并目标与源不同 kind／不同归属／不同父级，或目标未发布 | 只合并同一层级、同一容器里的重复建档，目标必须 `published` |
-| `forbidden`（403） | 角色不足：普通角色碰已发布条目、非管理员走 lifecycle、member 建关系或调 importer；**停用（`deleted`/`merged`）实体上的关联边删不掉也走这里** | 用 `catalog.entity.edit` 维护已发布条目；发布/合并/停用归 `catalog.lifecycle.manage`；悬空边清理属实例侧缺口，上报而不是反复重试 |
+| `invalid_merge_target` | 合并目标与源不同 kind／不同归属／不同父级，或目标不是 active | 核对相同身份与归属，选择 active 的保留目标 |
+| `forbidden`（403） | 账号或凭据缺少操作权限，或对象不可写 | 核对当前权限与凭据 scopes；普通编辑走提交，单对象直接写入还需免审权限，合并和退役需生命周期权限 |
 | `authentication_required`（401） | **写端点**没有有效令牌（会话 / OAuth 令牌缺失或验签失败） | 核对本地凭据或重新登录；读端点返回 200 不代表写权限凭据有效 |
 | `invalid_token`（401） | **PAT（`mfp_` 前缀）** 无效 / 已吊销 / 已过期 / 账号被封禁，不细分原因 | 确认凭据失效后再选择其他有效凭据；不要因任务结束自动轮换 |
 | `auth_unavailable`（503） | PAT 请求问不到账号服务：内省端点不可达 / 超时 / 该服务没配 `AUTH_URL` | 依赖故障，退避重试即可；**不要**当凭据问题去换令牌（换令牌同样 503） |

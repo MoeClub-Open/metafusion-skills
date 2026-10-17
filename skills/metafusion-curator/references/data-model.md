@@ -61,4 +61,4 @@ Work 唯一不代表 Expression 唯一；录音室、现场、伴奏、混音按
 
 电影本体与同名 OST 都可能是 Work；按内容、责任主体与来源区分，标签不单独判身份。仅重排/定位变化复用内容，真实章节拆合或内容修订再区分 ContentUnit/Expression。
 
-用户要求核对时可参考 [核对清单](qa-checklist.md)，无需在普通编辑前执行；来源与需要时的批次计数见 [来源策略](source-policy.md)。
+用户要求核对时可参考[核对清单](qa-checklist.md)，无需在普通编辑前执行；事实依据见[来源说明](source-policy.md)。

@@ -5,16 +5,19 @@ description: 选择 MetaFusion 实体层级、命名作品与发行版、判断�
 
 # 层级与命名
 
-读写工具见 [metafusion-curator](../metafusion-curator/SKILL.md)；结构细节见 [数据模型](../metafusion-curator/references/data-model.md)。
+按资料实际描述的身份建模，不要求凑齐整条实体链。读写工具见[编目技能](../metafusion-curator/SKILL.md)，结构约束见[数据模型](../metafusion-curator/references/data-model.md)。
 
-- **Work** 保存创作身份与正式题名。Season、Vol、OST 等是否属于题名按官方证据判断，不机械删词；出版社、品番、规格、包装放发行侧。
-- 中文译名仅在[官方或授权本地化来源支持](../metafusion-curator/references/source-policy.md#中文译名)时录入；没有就保留原名，原语言资料不要求另配中文译名。非官方译名不能混入无标记的题名或别名。
-- **ContentUnit** 是同 Work 的逻辑章/集；**Expression** 是正文、译文、录音等可复用表达。现场、伴奏、重录、混音先核内容身份；不因同名或时长近似合并，也不为挂署名复制表达。
-- 品番、地区或收录位置不证明独立录音/母版，不把商品名写成录音的 `version_label`。商品页仅有曲名时不能据此声明 SKU 专属录音；证据不足先保留已确认收录对象与待核缺口。
-- **Release** 对应真实版次；普通、限定、地区、数字、再版按实际差异区分。购买渠道本身不制造版次；版本组须有明确来源，不从共同 subjects 推断。
-- **Medium/Track** 按实际包装与目录建立；`number` 保留官方编号，`position` 表示顺序。同一表达跨发行复用 `Track.contents`。
-- 歌曲可有独立 Work，单曲发行是 Release。专辑组成用当前启用关系，歌曲不改挂专辑；发行 subjects 覆盖实际收录 Work。
-- 盒装用 subjects + Medium/Track；仅有独立创作证据时另建汇编 Work。附赠 MV/现场盘建真实内容链，附件清单不能代替收录。
-- 无章节、曲目或表达证据时留空，不从卷数/盘数推造层级；可先补已确认的 subjects。
+| 层级 | 保存什么 |
+| --- | --- |
+| Work | 作品本身的名称与创作身份；歌曲和有独立创作身份的专辑可各有 Work |
+| ContentUnit | 同一 Work 内稳定的章、集或篇目 |
+| Expression | 具体正文、译文、录音或剪辑，可跨发行复用 |
+| Release | 原样保留发行方为该版使用的名称，另记编号、地区、包装 |
+| Medium / Track | 实际承载单元与收录位置，`number` 保留官方编号、`position` 表示顺序 |
 
-按需查 [来源](../metafusion-curator/references/source-policy.md)、[字段](../metafusion-curator/references/types-and-fields.md)、[关系](../metafusion-curator/references/relations.md)；无准确落点时查 [定义扩展](../metafusion-curator/references/model-gaps.md)。
+- 正式题名中的 Season、Vol、OST 等按来源保留。中文名称采用[官方或授权本地化译名](../metafusion-curator/references/source-policy.md#中文译名)，无官方译名就用原名。
+- 现场、重录、伴奏、混音按内容身份区分；同名或相近时长不证明同一表达，品番与商品名也不证明新录音。缺少内容差异证据时不机械复制 Expression。
+- 歌曲录音仍属于歌曲 Work，专辑组成用相应关系；Release.subjects 声明收录 Work，Track.contents 引用实际 Expression。组成、版本组与本版曲序分别记录。
+- 多作品盒装按 subjects + Medium/Track 收录；有独立汇编创作证据时再建 Work。有实际目录再建章、集或曲目，初回附件和真实特典盘分别表达。
+
+关系选择与准确落点见[关系](../metafusion-curator/references/relations.md)和[定义扩展](../metafusion-curator/references/model-gaps.md)。

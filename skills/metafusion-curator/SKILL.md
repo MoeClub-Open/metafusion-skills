@@ -1,45 +1,30 @@
 ---
 name: metafusion-curator
-description: MetaFusion 实体编目、查重、关系维护与数据质检。用于目录数据读写，不用于代码开发或部署。
+description: 查询和编辑 MetaFusion 目录实体、收录与署名关系，维护来源并处理提交。不用于项目开发或部署。
 ---
 
 # MetaFusion 编目
 
-## 入口
+按用户已明确的目标和授权执行，可以只修改当前确认的部分。质检、评分、完整度和核对清单都是可选参考，不作为编辑或提交门槛。
 
-两种运行方式，契约同源，按环境选一种（也可以并用）：
+## 入口与提交
 
-- **云端 MCP**：读取 `metafusion://skills/curator` 或调用 `metafusion_reference`，用 `metafusion_api_contract` 读契约、`metafusion_api_call` 调接口；提交与文件处理见[云端操作](references/cloud.md)。不要求终端、Node.js、Python 或本地文件系统。
-- **本地工具**：在 `scripts/tools/` 使用 `mf-source` 检索来源、`mf-platform` 只读目录、`mf-workspace` 管理本地副本与 commit/push、`mf-definitions` upsert 词项或受控新增单个字段。参数查工具帮助；[工具索引](scripts/tools/README.md)，[凭据配置](scripts/README.md)。
-
-两种方式都不等于写入授权：是否允许写入由用户对具体任务授权。需要一段可直接复制给 Agent 的启动提示词时，用仓库 [README 的「给 Agent 的提示词」](../../README.md#给-agent-的提示词)。
-
-外部信息获取由 Agent 自行规划：自行选择检索工具、来源、顺序及证据取舍。平台工具与本技能描述数据契约、质量要求和操作方法，不接管检索流程，不主动发现或选择外部来源。
-
-## 规则
-
-- 开始实例操作时核 OpenAPI 与 definitions；字段、关系、词项使用当前启用定义。
-- 查重核 kind、内容身份、父级作用域与 canonical ID；同名或同 Work 不证明同一 Expression。正式题名不机械清洗。
-- 中文译名须有官方或授权本地化证据；无证保留原名，不自行翻译、音译或把社区译名写成中文题名/别名。非官方译名的标记条件见[来源策略](references/source-policy.md#中文译名)，不要为补齐语言资料而造名。
-- Release `subjects` 声明 Work，Track `contents` 引用 Expression；先声明 subjects，再补收录。
-- 商品页曲目表只能证明收录，品番不证明独立录音或母版。
-- 允许逐步补充资料；质检、评分、完整性统计与[核对参考](references/qa-checklist.md)均为可选辅助，不是编辑、提交或应用的前置条件。不要要求先运行审计、完成清单或补齐其它资料才执行用户已授权的修改。
-- 普通实体/关系编辑只走变更集：checkout → 构造修改 → commit → preview → push → 回执与展示核验，不调用旧整实体 PUT 工具。云端用 MCP 封存提交；本地模式使用系统临时目录下的独立任务工作区，所有中间脚本、草稿、查询与输出均放任务目录，不写入本仓库；[提交与恢复](references/workflow.md)。**提交证据必填：** 每条 source 要有唯一 `key`，每个操作要有 `source_refs`；旧格式会被 `source_refs_required` 拒绝（见[载荷模板](references/api-templates.md#变更集信封)）。本地 `mf-workspace commit` 会自动补 key/source_refs；MCP 手写载荷必须自己写全。
-- 创建先核可见 canonical 候选，保存 reviewed_candidate_ids；有候选只在来源证明不同身份后列为已审查。服务端按题名、各语言题名、外部 ID 和结构作用域复核，集合变化需重新审查。
-- 不同字段自动合并；同字段冲突须明确取舍再 rebase。未知推送保留同 ID、同载荷，先查回执；不能换 ID、重建计划、睡眠等全库稳定或盲目重试旧写接口。
-- 结构和关系提交已按事务并行。`transaction_busy` 尊重 Retry-After 后显式推送原提交；服务端只自动重试数据库确认回滚的事务，不把网络未知结果当失败。不要等待全库低峰或增加 Agent 绕过热点。
-- 条目没有草稿或发布状态。`state` 仅表示 active/deleted/merged 生命周期；已生效条目 `review_status=reviewed`。普通提交返回 HTTP 202、`applied=false`、`review_status=pending_review`：这是已确认入队，不是失败；保留同 ID，等待审核并用回执查询结果，不能重新提交或把模拟版本写回本地。`catalog.review.bypass` 免审立即生效；`catalog.review.manage` 审核整笔提交。审核期间条目保持旧内容、旧版本和已审核标记。退回后可依据当前版本重新准备新提交。
-- Track 元数据使用 patch；单条收录可用 entity 的 `action=content` 与 `content_change={action:add|replace|delete,position,inclusion?}`，保留隐藏历史收录。关系删除使用 `target=relation,action=delete,id,base_version`；删除实体、身份合并、定义和文件操作按各自权限维护。
+- **云端 MCP**：用 `metafusion_reference` 读技能、`metafusion_api_contract` 读当前契约，`metafusion_api_call` 查询；提交与文件工具见[云端操作](references/cloud.md)，无需本地运行环境。
+- **本地工具**：`scripts/tools/` 中用 `mf-source` 查来源、`mf-platform` 读目录、`mf-workspace` 编辑和提交；参数看工具帮助。[工具索引](scripts/tools/README.md) · [凭据配置](scripts/README.md)。
+- 字段、词项与关系以目标实例当前 OpenAPI、definitions 为准；层级、身份与复用按[命名和建模](../lrm-catalog-standards/SKILL.md)。中文名称遵循[官方译名规则](references/source-policy.md#中文译名)。
+- 创建或改变身份时查询 canonical 候选，按 API 提供 `reviewed_candidate_ids`；普通字段修改不扩大为整库查重。
+- 普通写入走 checkout → 修改 → commit → preview → push，只提交本次修改。每条来源有唯一 `key`，每个操作有 `source_refs`；具体载荷见[提交示例](references/api-templates.md#变更集信封)。
+- HTTP 202 / `pending_review` 表示已入队，免审提交立即应用；待审不改变当前条目。结果未知时保留同一提交 ID 查回执，实际冲突再 rebase。写后回读受影响内容；详见[提交与恢复](references/workflow.md)。
 
 ## 按需参考
 
-| 任务 | 参考 |
+| 需要处理的问题 | 参考 |
 | --- | --- |
-| 层级、复用、命名 | [数据模型](references/data-model.md)、[命名规范](../lrm-catalog-standards/SKILL.md) |
-| 来源、当前证据、封面 | [来源策略](references/source-policy.md) |
-| Wiki 正文与多语言文章 | [条目正文](references/articles.md)；本地 `mf-workspace article` 只改工作副本 |
-| 多 Agent、本地副本、批量推送或冲突 | [提交与恢复](references/workflow.md) |
-| 自定义请求或接口失败 | [载荷](references/api-templates.md)、[API 行为](references/api-behavior.md)、[错误码](references/api-errors.md) |
-| 权限与服务归属 | [接口范围](references/endpoint-scope.md) |
-| 字段、关系或定义缺口 | [字段](references/types-and-fields.md)、[关系](references/relations.md)、[扩展定义](references/model-gaps.md) |
-| 文件操作或用户要求的数据核对 | [文件绑定](references/file-upload.md)、[可选核对参考](references/qa-checklist.md) |
+| 实体层级、归属、收录和复用 | [数据模型](references/data-model.md) |
+| 来源、名称、封面及原始资料 | [来源说明](references/source-policy.md) |
+| 字段、关系或定义扩展 | [字段](references/types-and-fields.md) · [关系](references/relations.md) · [定义扩展](references/model-gaps.md) |
+| Wiki 正文或文件绑定 | [条目正文](references/articles.md) · [文件绑定](references/file-upload.md) |
+| 自定义请求、权限或错误恢复 | [API 行为](references/api-behavior.md) · [接口范围](references/endpoint-scope.md) · [错误码](references/api-errors.md) |
+| 用户要求核对数据 | [可选核对参考](references/qa-checklist.md) |
+
+本地工作副本和运行产物放独立任务目录；可复制的启动提示词见[仓库 README](../../README.md#给-agent-的提示词)。

@@ -4,7 +4,7 @@
 
 ## 请求头与证据
 
-实体与关系写入位于 `/api/catalog/*`，需要登录；定义管理、导入与文件操作的路径见[接口范围](endpoint-scope.md)。凭据三选一（都放在同一个请求头里）：
+实体与关系写入位于 `/api/catalog/*`，需要登录；定义管理、外部来源查询与文件操作的路径见[接口范围](endpoint-scope.md)。凭据三选一（都放在同一个请求头里）：
 
     Authorization: Bearer <会话令牌 / OAuth 访问令牌 / PAT>
     # PAT 是 `mfp_` 前缀的长期机器凭据：跑脚本或 Agent 时用它，不要共用某个人的会话令牌；
@@ -21,15 +21,13 @@
       {"kind": "url", "citation": "发行方官方目录：支持 release.title、catalog_number、edition_date、subjects/contents", "url": "https://example.org/official-catalog"}
     ]
 
-`sources[].kind` 只能是 `url` / `publication` / `self`；`citation` 必填并应明确列出所支持字段；带 `url` 时必须是可公开访问的 HTTP(S) 地址、不得含用户信息。缺 `edit_note` 或缺 `sources` 会被拒绝为 `evidence_required`——**这是服务端强制的载荷门，不代表证据权威或字段级合格**。
-
-`self` 只能记录没有新增外部断言的维护、清理或限制说明，不能支撑题名、简介、编号、关系、身份锚点或封面权利。公开可访问的作者/机构自述应按 `url` 或 `publication` 登记，并仍按[字段级来源策略](source-policy.md)判断是否满足核心门槛。服务端通过也不等于 CORE-P1 已核实。
+新来源使用 `url` / `publication`，`citation` 说明支持的事实；URL 为不含用户信息的公开 HTTP(S) 地址。历史 DTO 中的 `self` 不可用于新增来源，当前实例及其子域也不能作为独立证据（`source_not_eligible`）。缺 `edit_note` 或 `sources` 返回 `evidence_required`；这些是 API 输入要求，来源的实际支持范围见[来源说明](source-policy.md)。
 
 ## 变更集信封
 
 Agent 普通编辑使用 checkout 与 CatalogCommit，完整协议只维护在[公开提交文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md)，本地流程见[提交与恢复](workflow.md)。操作携带 base_version、JSON Pointer patch；实体创建声明 reviewed_candidate_ids 与本批 ref。
 
-**破坏性变更（无兼容模式）：** 每个 `sources[]` 必须有唯一 `key`；每个操作必须有非空 `source_refs`（`[{source:<key>, pointers?:[json-pointer]}]`）。缺 key → `source_key_required`；缺/空 `source_refs` → `400 {"error":"source_refs_required","applied":false,"operation":<从0起>}`；池中未被引用的来源 → `source_unused`。旧格式提交一律拒绝，客户端必须升级。本地 `mf-workspace commit` 会在缺省时自动补 `s1…` key 并把全部来源挂到每个操作；云端 MCP / 手写载荷必须自己写全。 本地默认映射要求所给来源确实支持每个操作；不同条目或字段使用不同证据时应拆分提交，不能把自动映射当作字段来源核验。
+每条 `sources[]` 有唯一 `key`；每个操作用非空 `source_refs`（`[{source:<key>, pointers?:[json-pointer]}]`）引用来源。缺 key、缺引用或来源未被使用分别返回 `source_key_required`、`source_refs_required`、`source_unused`。本地工具默认自动补 key 并把来源池映射到每个操作；需要不同来源归属时，在提交 API 中显式填写各操作的 `source_refs`，无需因为来源不同而拆分提交。
 
     {
       "id": "<固定 UUID>",
@@ -153,7 +151,7 @@ PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐�
 - `title` 是基础题名，`original_language` 声明它属于哪个语种；原语言题名放在对应 locale 的 `translations` 行里。
 - `external_links` 的键必须来自实例预设；作品/发行/主体的官方站点用 `official_website` 记**完整 URL**
   （前端"外部资料"面板据此渲染官网入口并排在首位），核到官网就不要让它留在空对象里。
-- `pictures[].url` 必须是绝对 HTTP(S) 地址：相对路径（如 `/assets/covers/x.webp`）会被拒绝为 `invalid_picture`。图片须匹配具体实体/发行版；当前任务的图片操作授权与版权/许可材料分开记录。明确的任务操作授权可在其范围内执行，但不等于权利已核实；权利材料未知时报告 `unknown`，不能写成 `passed`。计数条件按本次批次定义。
+- `pictures[].url` 是绝对 HTTP(S) 地址，相对路径会返回 `invalid_picture`。图源、版次及转载许可分别核实，不因地址可访问就宣称权利已确认。
 - 图片可带 `version_label`（多语言）、`usage_period: {begin?, end?}`（至少一端非空）、`role`（启用的 `picture_role` 词表码）与 `asset_id`（存储资产 UUID）；使用时段不表示版权期限。数组首项是手动封面，`taken_at` 不决定排序。自托管图片先完成 `cover_image` 绑定，再写 `asset_id` 并回读，流程见[文件上传与绑定](file-upload.md)。
 - **不要**提交顶层 `cover_aspect` / `cover_image_url`：它们不在写入 DTO 里，严格解析会直接 `400 invalid_payload`。
 

@@ -29,7 +29,7 @@
 | `character` | entity → **`agent`** | 配音/出演的角色（角色本身也是 agent） |
 | `context` | entity → `work`\|`content_unit`\|`expression`\|`release` | 该署名适用于哪部作品/哪个篇目 |
 | `language` | text | 该署名对应的语言版本（`ja` / `zh-CN`…） |
-| `begin_date` / `end_date` | date | 任期/期间（"某人在某团体期间"只能落在这里） |
+| `begin_date` / `end_date` | date | 这条关系成立的任期或期间 |
 | `scope` | text | 适用范围说明的自由文本 |
 
 惯例两例：
@@ -60,6 +60,6 @@ expression_composition 必须是 expression→expression、scope=work、acyclic=
 
 创建/更新/删除信封统一见 [关系载荷](api-templates.md#关系)，不在本页重复。关系当前版本从 `GET /api/catalog/entities/{id}/relations` 返回项取，写后回读集合；删除同样需要 expected_version/edit_note/sources。
 
-关系接受证据不自动满足 CORE-P1。普通辅助关系可用 P2；用于作者、改编、系列归属或唯一身份锚点时，边与两端须按 [来源策略](source-policy.md) 核核心证据。引用要求目标存在、kind 相符、可见且未 deleted/merged；公开条目不可引用 draft。
+按[来源说明](source-policy.md)记录关系的实际依据。引用目标按当前 API 核对 kind、可见性和生命周期；条目没有草稿状态，尚未应用的创建仍属于待审提交。
 
 拒绝码与修复动作见 [API 错误码](api-errors.md)。

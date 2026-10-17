@@ -25,7 +25,7 @@
 
 `names` 需 zh-CN/zh-TW/en-US + ja 或 ja-JP，与实体 translations 不同。definitions 无历史、草稿或回滚；其余契约见 [API 行为](api-behavior.md)。
 
-可选 `group` 含必填子字段时，当前服务端会将整组视为必填；可选的结构化记录用 `list` + `items.group`，仅记录内部字段必填。
+单条结构化记录使用 `group`，重复记录使用 `list` + `items.group`。可选 group 可整体省略，提供对象后再校验组内必填字段；不必为了可选记录额外包一层列表。
 
 本地 `mf-definitions` 保留旧词项计划，并允许 `action: "field.create"` 新增字段；已有同码会拒绝。受控字段类型含 `list`，须提供受支持 Field 形状的 `items`。发行实体按 `attributes.list_price=[{amount,currency,tax_included?}]` 填写。模板见 [list-price-field.json](../scripts/tools/templates/list-price-field.json)。`tax_included` 可省略，省略表示未知；`currency` 虽标注 ISO 4217，但字段类型为普通 `text`，不会校验币种代码格式。
 
