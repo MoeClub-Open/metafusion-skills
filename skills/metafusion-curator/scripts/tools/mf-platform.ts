@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CatalogEntity } from "../metafusion-api.ts";
+import { readEntityLinks } from "./mf-links.ts";
 import {
   request as apiRequest,
   collectPages,
@@ -14,7 +15,7 @@ const ACTIONS = [
   "entity.list",
   "entity.resolve",
   "entity.current-revision",
-  "entity.relations",
+  "entity.links",
   "entity.occurrences",
   "release.toc",
   "definitions",
@@ -40,7 +41,7 @@ export function listOperations() {
   return ACTIONS.map((action) => ({
     action,
     mode: "read",
-    paginated: action === "entity.list",
+    paginated: action === "entity.list" || action === "entity.links",
   }));
 }
 export function schemaFor(action?: string) {
@@ -143,10 +144,16 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
       ...result,
     };
   }
+  if (plan.action === "entity.links") {
+    try {
+      return { ok: true, outcome: "complete", data: await readEntityLinks(plan.id, { requestFn }) };
+    } catch (error) {
+      return { ok: false, outcome: "partial", reason: String(error) };
+    }
+  }
   const paths = {
     "entity.get": entityPath(plan.id),
     "entity.resolve": entityPath(plan.id, "/resolve"),
-    "entity.relations": entityPath(plan.id, "/relations"),
     "entity.occurrences": entityPath(plan.id, "/occurrences"),
     "release.toc": `/api/catalog/releases/${encodeURIComponent(plan.id)}/toc`,
     definitions: "/api/catalog/definitions",
@@ -192,7 +199,7 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
           ? record(r.body?.document) && typeof r.body.etag === "string"
           : plan.action === "contract"
             ? record(r.body?.paths) && typeof r.body.openapi === "string"
-            : ["entity.relations", "entity.occurrences"].includes(plan.action)
+            : plan.action === "entity.occurrences"
               ? Array.isArray(r.body?.items)
               : record(r.body);
   return valid

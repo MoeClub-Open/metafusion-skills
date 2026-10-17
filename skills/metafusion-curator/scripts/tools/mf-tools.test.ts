@@ -20,6 +20,7 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
+const linkPage = (id, relations) => json({subject_id: id, limit: 100, has_more: false, entities: {}, items: relations.map((r) => ({key:r.id, version:r.version, rule_code:`relation:${r.type}`, class:"semantic",source_id:r.source_id,target_id:r.target_id,position:r.position,attributes:r.attributes}))});
 const sources = [
   {
     kind: "url",
@@ -104,8 +105,8 @@ function mergeFixture(
         : json({ error: "version_conflict" }, deleteStatus);
     }
     if (method === "POST") return json({ ...lose, state: "merged" });
-    if (path.endsWith(`${keep.id}/relations`)) return json({ items: keepRels });
-    if (path.endsWith(`${lose.id}/relations`)) return json({ items: loseRels });
+    if (path.endsWith(`${keep.id}/links`)) return linkPage(keep.id, keepRels);
+    if (path.endsWith(`${lose.id}/links`)) return linkPage(lose.id, loseRels);
     if (path.endsWith(`/${keep.id}`))
       return readbackFailure && currentKeep.version > keep.version
         ? json({ error: "forbidden" }, 403)
@@ -565,7 +566,7 @@ test("抽样关系读取失败不得声称全部结构合规", async () => {
       const target = new URL(url);
       if (target.pathname.endsWith("/definitions"))
         return json({ document: { relations: {} } });
-      if (target.pathname.endsWith("/relations"))
+      if (target.pathname.endsWith("/links"))
         return json({ error: "forbidden" }, 403);
       const items =
         target.searchParams.get("kind") === "work" ? [entity("work")] : [];

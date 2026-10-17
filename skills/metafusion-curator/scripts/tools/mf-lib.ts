@@ -17,6 +17,7 @@ import { request, listAll, publicFailure } from "../metafusion-api.ts";
 import { randomUUID } from "node:crypto";
 import { diffDocument, identityPatch } from "./mf-workspace.ts";
 import { findIdentity } from "./mf-find-identity.ts";
+import { readEntityLinks } from "./mf-links.ts";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 统一调用：直接透传技能客户端的 request，便于脚本处理非 2xx。 */
@@ -80,12 +81,12 @@ export async function listKind(kind, params = {}) {
 
 /** 某实体的关系边；失败即抛错。 */
 export async function relationsOf(id) {
-  const r = await request(
-    `/api/catalog/entities/${encodeURIComponent(id)}/relations`,
-  );
-  if (r.status !== 200)
-    throw new Error(`读取关系 ${id} 失败：HTTP ${r.status}`);
-  return r.body?.items ?? [];
+  const page = await readEntityLinks(id);
+  return page.items.filter((link) => link.class === "semantic").map((link) => ({
+    id: link.key, version: link.version, type: link.rule_code.slice("relation:".length),
+    source_id: link.source_id, target_id: link.target_id, position: link.position,
+    attributes: link.attributes || {},
+  }));
 }
 
 /** 带重试的实体读取（用于并发写入场景下取最新 version）。 */

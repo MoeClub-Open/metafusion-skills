@@ -362,7 +362,7 @@ expected_version 来自 Track。PUT `/api/catalog/tracks/{id}/contents/{position
 不要只凭 2xx 判定成功。至少重新 GET：
 
 - `/api/catalog/entities/{id}`（实体本体与 `version`）；
-- `/api/catalog/entities/{id}/relations`（关系与对端实体）；
+- `/api/catalog/entities/{id}/links`（关系、字段引用与端点实体，按 has_more 分页）；
 - `/api/catalog/entities/{id}/occurrences`（表达/内容单位的反向收录）；
 - `/api/catalog/entities/{id}/revisions`（核对本次修订与证据；快照及可见性限制见[API 行为参考](api-behavior.md)）；
 - 实例支持时，`/api/catalog/expressions/{id}/composition` 与 `/api/catalog/releases/{id}/editions` 核对直接组成和显式版本组；不由 subjects 推测；
