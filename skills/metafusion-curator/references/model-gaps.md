@@ -37,4 +37,4 @@
 - entity 引用须可见；实体无草稿状态，待审核的是提交，不能把尚未应用的创建作为已存在对象引用。分页期间并发修改会移动边界，按 ID 去重不等于同一快照。
 - 外部来源适配器只读，预览与查询不自动创建目录事实；旧导入写接口已移除。其它鉴权与服务边界见 [接口范围](endpoint-scope.md)。
 
-质检使用 [仓内工具](../scripts/tools/README.md) 与 [检查清单](qa-checklist.md)；空 subjects/medium 或允许入库不证明内容链完整。
+用户要求核对时，可使用 [仓内只读工具](../scripts/tools/README.md) 与 [核对参考](qa-checklist.md)。这些诊断不是编辑或提交门槛；subjects/medium 尚未补齐时仍可提交已确认的资料。

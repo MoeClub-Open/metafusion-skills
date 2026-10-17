@@ -22,7 +22,8 @@ description: MetaFusion 实体编目、查重、关系维护与数据质检。�
 - 查重核 kind、内容身份、父级作用域与 canonical ID；同名或同 Work 不证明同一 Expression。正式题名不机械清洗。
 - 中文译名须有官方或授权本地化证据；无证保留原名，不自行翻译、音译或把社区译名写成中文题名/别名。非官方译名的标记条件见[来源策略](references/source-policy.md#中文译名)，不要为补齐语言资料而造名。
 - Release `subjects` 声明 Work，Track `contents` 引用 Expression；先声明 subjects，再补收录。
-- 商品页曲目表只能证明收录，品番不证明独立录音或母版；补全或审查条目时按[质检清单](references/qa-checklist.md)核对来源事实覆盖，不能以结构检查 `complete` 代替语义验收。
+- 商品页曲目表只能证明收录，品番不证明独立录音或母版。
+- 允许逐步补充资料；质检、评分、完整性统计与[核对参考](references/qa-checklist.md)均为可选辅助，不是编辑、提交或应用的前置条件。不要要求先运行审计、完成清单或补齐其它资料才执行用户已授权的修改。
 - 普通实体/关系编辑只走变更集：checkout → 构造修改 → commit → preview → push → 回执与展示核验，不调用旧整实体 PUT 工具。云端用 MCP 封存提交；本地模式使用系统临时目录下的独立任务工作区，所有中间脚本、草稿、查询与输出均放任务目录，不写入本仓库；[提交与恢复](references/workflow.md)。**提交证据必填：** 每条 source 要有唯一 `key`，每个操作要有 `source_refs`；旧格式会被 `source_refs_required` 拒绝（见[载荷模板](references/api-templates.md#变更集信封)）。本地 `mf-workspace commit` 会自动补 key/source_refs；MCP 手写载荷必须自己写全。
 - 创建先核可见 canonical 候选，保存 reviewed_candidate_ids；有候选只在来源证明不同身份后列为已审查。服务端按题名、各语言题名、外部 ID 和结构作用域复核，集合变化需重新审查。
 - 不同字段自动合并；同字段冲突须明确取舍再 rebase。未知推送保留同 ID、同载荷，先查回执；不能换 ID、重建计划、睡眠等全库稳定或盲目重试旧写接口。
@@ -41,4 +42,4 @@ description: MetaFusion 实体编目、查重、关系维护与数据质检。�
 | 自定义请求或接口失败 | [载荷](references/api-templates.md)、[API 行为](references/api-behavior.md)、[错误码](references/api-errors.md) |
 | 权限与服务归属 | [接口范围](references/endpoint-scope.md) |
 | 字段、关系或定义缺口 | [字段](references/types-and-fields.md)、[关系](references/relations.md)、[扩展定义](references/model-gaps.md) |
-| 文件操作或质量审查 | [文件绑定](references/file-upload.md)、[质检清单](references/qa-checklist.md) |
+| 文件操作或用户要求的数据核对 | [文件绑定](references/file-upload.md)、[可选核对参考](references/qa-checklist.md) |
