@@ -5,7 +5,7 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.3",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test skills/metafusion-curator/scripts/metafusion-api.test.ts skills/metafusion-curator/scripts/tools/*.test.ts"
