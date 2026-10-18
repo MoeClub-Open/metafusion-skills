@@ -58,8 +58,8 @@ expression_composition 必须是 expression→expression、scope=work、acyclic=
 
 ## 写入与证据
 
-创建/更新/删除信封见[关系载荷](api-templates.md#关系)。统一 `/entities/{id}/links` 中，`relation:*` 的 key 是关系 ID、version 是当前版本；字段引用仍修改其所属实体，不重复建边。
+创建/更新/删除通过副本暂存，见[协作载荷](api-templates.md#协作载荷)。统一 `/entities/{id}/links` 中，`relation:*` 的 key 是关系 ID、version 是当前版本；字段引用仍修改其所属实体，不重复建边。
 
-按[来源说明](source-policy.md)记录关系的实际依据。引用目标按当前 API 核对 kind、可见性和生命周期；条目没有草稿状态，尚未应用的创建仍属于待审提交。
+按[来源说明](source-policy.md)记录关系的实际依据。引用目标按当前 API 核对 kind、可见性和生命周期；条目没有草稿状态，尚未合入的创建只存在于其工作副本。
 
 拒绝码与修复动作见 [API 错误码](api-errors.md)。

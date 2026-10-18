@@ -17,7 +17,7 @@
 
 ## 实体字段与动态属性
 
-title、original_language、translations、attributes、external_links、pictures、status、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](api-templates.md)。created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
+title、original_language、translations、attributes、external_links、pictures、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](api-templates.md)。state、review_status、created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
 
 两个易错点：
 
@@ -95,7 +95,7 @@ title、original_language、translations、attributes、external_links、picture
 
 **种子是空组**：未扩展时组内没有任何子字段，`contents[].attributes`（收录附加属性）与 `subjects[].attributes`
 （发行对象附加属性）写任何键都是 `unknown_field`，检索路径 `inclusion_attributes.x` / `subject_attributes.x`
-同样不可用。收录语境属性可按授权在 GUI 为这些组新增子字段；来源是新版 contents[].sources 独立键，不能塞进 attributes 或 locator。作品/表达自身事实和关系仍按各自身份填写，缺少落点时见[模型缺口](model-gaps.md)。
+同样不可用。收录语境属性可按授权在 GUI 为这些组新增子字段；可选来源位于 contents[].sources 独立键，不能塞进 attributes 或 locator。作品/表达自身事实和关系仍按各自身份填写，缺少落点时见[模型缺口](model-gaps.md)。
 
 ## `entry_role` 与 `air_date`
 
@@ -116,7 +116,7 @@ title、original_language、translations、attributes、external_links、picture
 - `isrc`：12 位码（独立码）。
 
 **官网是"外部资料"面板的正式字段，不是只进 `sources` 的旁证。** 核到作品 / 发行 / 主体的官方站点后，
-除按来源策略在 `sources` 记录它，还要把它写进 `external_links` 中 `kind="official_website"` 的 `url`：前端按 `sort_order`
+把它写进 `external_links` 中 `kind="official_website"` 的 `url`：前端按 `sort_order`
 把官网排在面板首位并做"官方"高亮。只留在 `sources` 里页面不会出现任何官网入口——
 症状是"条目有 Wikipedia / Bangumi / Steam，却没有一条官方链接"。
 

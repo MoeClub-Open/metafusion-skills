@@ -5,6 +5,7 @@ import {
   collectPages,
   listAll,
   normalizePageLimit,
+  publicFailure,
   request,
   writableEntity,
 } from "./metafusion-api.ts";
@@ -16,6 +17,14 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+test("workspace conflicts retain base/current/proposed values and discard unrelated response fields", () => {
+  const conflict = { target: "entity", id: "entity-1", pointer: "/translations/en-US/body",
+    base_version: 2, current_version: 3, base: "Original", current: "Other edit", proposed: "My edit", kind: "field" };
+  const result = publicFailure({ status: 409, body: { error: "workspace_conflict", conflicts: [{ ...conflict, debug_secret: "private" }], internal: "hidden" } });
+  assert.deepEqual(result, { error: "workspace_conflict", conflicts: [conflict] });
+  assert.equal(publicFailure({ status: 409, body: { error: "workspace_head_conflict" } }).error, "workspace_head_conflict");
 });
 
 function jsonResponse(body, status = 200) {
@@ -38,7 +47,8 @@ function currentEntity() {
     translations: {
       "en-US": { title: "Example", summary: "Official summary" },
     },
-    status: "draft",
+    state: "active",
+    review_status: "reviewed",
     created_by: "user-1",
     updated_at: "2026-01-01T00:00:00Z",
   };

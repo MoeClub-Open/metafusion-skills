@@ -1,30 +1,26 @@
 ---
 name: metafusion-curator
-description: 查询和编辑 MetaFusion 目录实体、收录与署名关系，维护来源并处理提交。不用于项目开发或部署。
+description: 查询和协作编辑 MetaFusion 目录实体、收录与署名关系，使用服务器工作副本、提交和合并请求。不用于项目开发或部署。
 ---
 
 # MetaFusion 编目
 
-按用户已明确的目标和授权执行，可以只修改当前确认的部分。质检、评分、完整度和核对清单都是可选参考，不作为编辑或提交门槛。
+按用户的目标与授权执行，可以只修改已确认的部分。来源、查证记录、质检与完整度不作为编辑或提交门槛，也不为满足工具而编造资料。
 
-## 入口与提交
-
-- **云端 MCP**：用 `metafusion_reference` 读技能、`metafusion_api_contract` 读当前契约，`metafusion_api_call` 查询；提交与文件工具见[云端操作](references/cloud.md)，无需本地运行环境。
-- **本地工具**：`scripts/tools/` 中用 `mf-source` 查来源、`mf-platform` 读目录、`mf-workspace` 编辑和提交；参数看工具帮助。[工具索引](scripts/tools/README.md) · [凭据配置](scripts/README.md)。
-- 字段、词项与关系以目标实例当前 OpenAPI、definitions 为准；层级、身份与复用按[命名和建模](../lrm-catalog-standards/SKILL.md)。中文名称遵循[官方译名规则](references/source-policy.md#中文译名)。
-- 创建或改变身份时查询 canonical 候选，按 API 提供 `reviewed_candidate_ids`；普通字段修改不扩大为整库查重。
-- 普通写入走 checkout → 修改 → commit → preview → push，只提交本次修改。每条来源有唯一 `key`，每个操作有 `source_refs`；具体载荷见[提交示例](references/api-templates.md#变更集信封)。
-- HTTP 202 / `pending_review` 表示已入队，免审提交立即应用；待审不改变当前条目。结果未知时保留同一提交 ID 查回执，实际冲突再 rebase。写后回读受影响内容；详见[提交与恢复](references/workflow.md)。
+- **云端 MCP**：用 `metafusion_reference` 读技能、`metafusion_api_contract` 读当前契约；[云端操作](references/cloud.md)介绍工作副本工具，无需本地运行环境。
+- **本地工具**：`mf-source` 读外部资料、`mf-platform` 读目录、`mf-workspace` 管理服务器副本。见[工具索引](scripts/tools/README.md)与[凭据配置](scripts/README.md)。
+- 字段、词项与关系以目标实例的 OpenAPI、definitions 为准。层级和名称按[命名与建模](../lrm-catalog-standards/SKILL.md)；无官方中文译名时保留原名。
+- 编辑流程为创建副本 → checkout → 多次 stage → commit → push。stage 与 commit 都不改变正式目录；免审用户 push 直接合入，其他用户生成 PR。一个副本可持续积累多次提交，协作者的提交各自署名。
+- 冲突时比较 base、current 与 proposed，通过 rebase 生成解决后的新提交；保留原作者，不覆盖他人改动。版本、提交 ID 与恢复见[协作流程](references/workflow.md)。
 
 ## 按需参考
 
-| 需要处理的问题 | 参考 |
+| 问题 | 参考 |
 | --- | --- |
-| 实体层级、归属、收录和复用 | [数据模型](references/data-model.md) |
-| 来源、名称、封面及原始资料 | [来源说明](references/source-policy.md) |
+| 层级、归属、收录与复用 | [数据模型](references/data-model.md) |
+| 名称、来源与原始资料 | [来源说明](references/source-policy.md) |
 | 字段、关系或定义扩展 | [字段](references/types-and-fields.md) · [关系](references/relations.md) · [定义扩展](references/model-gaps.md) |
-| Wiki 正文或文件绑定 | [条目正文](references/articles.md) · [文件绑定](references/file-upload.md) |
-| 自定义请求、权限或错误恢复 | [API 行为](references/api-behavior.md) · [接口范围](references/endpoint-scope.md) · [错误码](references/api-errors.md) |
-| 用户要求核对数据 | [可选核对参考](references/qa-checklist.md) |
+| 正文或文件 | [条目正文](references/articles.md) · [文件绑定](references/file-upload.md) |
+| 请求、权限与错误 | [载荷](references/api-templates.md) · [API 行为](references/api-behavior.md) · [接口范围](references/endpoint-scope.md) · [错误码](references/api-errors.md) |
 
-本地工作副本和运行产物放独立任务目录；可复制的启动提示词见[仓库 README](../../README.md#给-agent-的提示词)。
+可复制的启动提示词见[仓库 README](../../README.md#给-agent-的提示词)。

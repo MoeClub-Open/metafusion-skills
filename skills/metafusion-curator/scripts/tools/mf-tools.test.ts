@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
-import { identityPatch, rebasePatch } from "./mf-workspace.ts";
 import { mergeEntity, unionInto, identityConflicts } from "./mf-lib.ts";
 import { checkBangumi, checkMusicBrainz } from "./mf-audit-external-links.ts";
 
@@ -46,365 +45,157 @@ const json = (body, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 
-function mergeFixture(
-  keep,
-  lose,
-  {
-    keepRels = [],
-    loseRels = [],
-    deleteStatus = 204,
-    deleteNetworkFailure = false,
-    readbackFailure = false,
-    candidateRows,
-    candidateResponse,
-    candidateStatus = 200,
-    commitStatus = 200,
-  } = {},
-) {
+function mergeFixture(keep, lose, { keepRels = [], loseRels = [], pushStatus = 200, pending = false,
+  readbackFailure = false, stageStatus = 200, forkVersionChanged = false, lifecycleStatus = 200,
+  pushThrows = false } = {}) {
   const calls = [];
-  let currentKeep = structuredClone(keep);
+  let currentKeep = structuredClone(keep), workspace, commit;
   globalThis.fetch = async (url, init = {}) => {
     const path = new URL(url).pathname;
     const method = init.method || "GET";
     const body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ path, method, body });
-    if (path.endsWith("/definitions")) return json({ etag: "defs" });
-    if (path.endsWith("/candidates")) {
-      const rows = candidateRows ?? [keep, lose].map((e) => ({ matched: e, canonical: e }));
-      return json(candidateResponse ?? { basis: "postgres_repeatable_read", total: rows.length, complete: true, items: rows }, candidateStatus);
+    if (path === "/api/catalog/workspaces" && method === "POST") {
+      workspace = { id: "workspace", version: 1, head_commit_id: null, objects: [
+        { target: "entity", id: keep.id, base_version: keep.version + (forkVersionChanged ? 1 : 0), document: keep },
+        { target: "entity", id: lose.id, base_version: lose.version, document: lose },
+        ...loseRels.map((r) => ({ target: "relation", id: r.id, base_version: r.version, document: r })),
+      ] };
+      return json(workspace, 201);
     }
-    if (path.endsWith("/commits")) {
-      if (identityPatch(body.operations[0].patch)) assert.ok(Array.isArray(body.operations[0].reviewed_candidate_ids));
-      else assert.equal(Object.hasOwn(body.operations[0], "reviewed_candidate_ids"), false);
-      if (commitStatus !== 200) return json({ error: "identity_candidates_changed",
-        identity_review: { operation: 0, candidate_ids: [lose.id, "10000000-0000-0000-0000-000000000001"] } }, commitStatus);
-      currentKeep = {
-        ...rebasePatch(currentKeep, currentKeep, body.operations[0].patch)
-          .working,
-        version: currentKeep.version + 1,
-      };
-      return json({
-        id: body.id,
-        applied: true,
-        refs: {},
-        items: [
-          {
-            target: "entity",
-            id: currentKeep.id,
-            version: currentKeep.version,
-            changed: true,
-            merged: false,
-          },
-        ],
-      });
+    if (path.endsWith("/changes")) {
+      if (stageStatus !== 200) return json({ error: "version_conflict" }, stageStatus);
+      assert.equal(method, "PUT");
+      assert.equal(body.expected_version, workspace.version);
+      workspace.version++;
+      return json({ workspace, refs: {} });
     }
-    if (method === "DELETE") {
-      if (deleteNetworkFailure) throw new Error("network interrupted");
-      return deleteStatus === 204
-        ? new Response(null, { status: 204 })
-        : json({ error: "version_conflict" }, deleteStatus);
+    if (path.endsWith("/commits") && method === "POST") {
+      assert.equal(body.expected_version, workspace.version);
+      commit = { id: body.id, workspace_id: workspace.id };
+      workspace.version++;
+      workspace.head_commit_id = body.id;
+      return json(commit, 201);
     }
-    if (method === "POST") return json({ ...lose, state: "merged" });
+    if (path.endsWith("/push")) {
+      if (pushThrows) throw new Error("network interrupted");
+      if (pushStatus !== 200) return json({ error: "workspace_conflict" }, pushStatus);
+      assert.equal(body.expected_version, workspace.version);
+      assert.equal(body.expected_head, commit.id);
+      if (pending) return json({ applied: false, workspace, commits: [commit], pull_request: { id: "pr" } }, 202);
+      currentKeep = { ...currentKeep, ...unionInto(keep, lose, { kind: keep.kind }).entity, version: keep.version + 1 };
+      return json({ applied: true, workspace, commits: [commit], pull_request: null });
+    }
+    if (path === "/api/catalog/workspaces/workspace") return json(workspace);
+    if (path.endsWith("/lifecycle")) return json(lifecycleStatus === 200 ? { ...lose, state: "merged", redirect_id: keep.id } : { error: "forbidden" }, lifecycleStatus);
     if (path.endsWith(`${keep.id}/links`)) return linkPage(keep.id, keepRels);
     if (path.endsWith(`${lose.id}/links`)) return linkPage(lose.id, loseRels);
-    if (path.endsWith(`/${keep.id}`))
-      return readbackFailure && currentKeep.version > keep.version
-        ? json({ error: "forbidden" }, 403)
-        : json(currentKeep);
+    if (path.endsWith(`/${keep.id}`)) return readbackFailure && currentKeep.version > keep.version ? json({ error: "forbidden" }, 403) : json(currentKeep);
     if (path.endsWith(`/${lose.id}`)) return json(lose);
     throw new Error(`Unexpected request: ${method} ${path}`);
   };
   return calls;
 }
 
-test("合并实际写入缺真实来源或只有 self 时不发请求", async () => {
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls++;
-    throw new Error("must not request");
-  };
-  for (const evidence of [[], [{ kind: "self", citation: "same name" }]]) {
-    const result = await mergeEntity({
-      kind: "work",
-      keep: entity("keep"),
-      lose: entity("lose"),
-      dryRun: false,
-      sources: evidence,
-    });
+test("缺来源和查证记录不阻断副本提交或管理员身份合并", async () => {
+  const keep = entity("keep"), lose = entity("lose", { attributes: { language: "ja" } });
+  const calls = mergeFixture(keep, lose);
+  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.completedSteps, ["workspace_created", "staged", "committed", "workspace_merged", "lifecycle"]);
+  assert.ok(calls.filter((c) => c.method !== "GET").every((c) => !Object.hasOwn(c.body, "sources")));
+  assert.equal(calls.some((c) => c.path.endsWith("/candidates")), false);
+  assert.equal(calls.some((c) => c.path === "/api/catalog/commits"), false);
+});
+
+test("预检版本变化和fork创建竞态不会覆盖正式目录", async () => {
+  const keep = entity("keep"), lose = entity("lose", { attributes: { language: "ja" } });
+  let calls = mergeFixture({ ...keep, version: 5 }, lose);
+  let result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+  assert.match(result.reason, /version_conflict/);
+  assert.ok(calls.every((c) => c.method === "GET"));
+  calls = mergeFixture(keep, lose, { forkVersionChanged: true });
+  result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+  assert.match(result.reason, /version_conflict/);
+  assert.equal(calls.some((c) => c.path.endsWith("/changes")), false);
+  assert.equal(result.applied, false);
+});
+
+test("并集及删除冗余边在同一副本一次暂存提交，不走旧写API", async () => {
+  const keep = entity("keep"), lose = entity("lose", { attributes: { language: "ja" } });
+  const edge = (id, source_id) => ({ id, source_id, target_id: "agent", type: "credit_for", attributes: {}, version: 2 });
+  const calls = mergeFixture(keep, lose, { keepRels: [edge("keep-edge", keep.id)], loseRels: [edge("lose-edge", lose.id)] });
+  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.edgeDeletes, 1);
+  const operations = calls.find((c) => c.path.endsWith("/changes")).body.operations;
+  assert.equal(operations.length, 2);
+  assert.deepEqual(operations[1], { target: "relation", action: "delete", id: "lose-edge" });
+  assert.equal(calls.some((c) => c.method === "DELETE" || c.method === "PUT" && !c.path.endsWith("/changes")), false);
+});
+
+test("PR待合入、真实冲突、暂存失败或未知push均停止生命周期，写入不重放", async () => {
+  const keep = entity("keep"), lose = entity("lose", { attributes: { language: "ja" } });
+  for (const options of [{ pending: true }, { pushStatus: 409 }, { stageStatus: 409 }, { pushThrows: true }]) {
+    const calls = mergeFixture(keep, lose, options);
+    const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
     assert.equal(result.ok, false);
     assert.equal(result.partial, false);
+    assert.equal(calls.some((c) => c.path.endsWith("/lifecycle")), false);
+    assert.ok(calls.filter((c) => c.path.endsWith("/push")).length <= 1);
+    if (options.pending) { assert.equal(result.reason, "pull_request_open_stop_merge"); assert.equal(result.applied, false); }
   }
-  assert.equal(calls, 0);
 });
 
-test("外链并集对相同地址的元数据差异和相同 ID 的不同地址显式报冲突", () => {
-  const base = entity("base");
+test("正式目录已合入后回读失败或生命周期失败明确报告部分完成", async () => {
+  const keep = entity("keep"), lose = entity("lose", { attributes: { language: "ja" } });
+  for (const options of [{ readbackFailure: true }, { lifecycleStatus: 403 }]) {
+    const calls = mergeFixture(keep, lose, options);
+    const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+    assert.equal(result.ok, false);
+    assert.equal(result.partial, true);
+    assert.equal(result.atomic, false);
+    assert.equal(result.applied, true);
+    assert.ok(result.completedSteps.includes("workspace_merged"));
+    assert.equal(result.completedSteps.includes("lifecycle"), false);
+    if (options.readbackFailure) assert.equal(calls.some((c) => c.path.endsWith("/lifecycle")), false);
+  }
+});
+
+test("dry-run只读且无来源门槛；无事实并集时仅执行独立管理员生命周期动作", async () => {
+  const keep = entity("keep"), lose = entity("lose");
+  let calls = mergeFixture(keep, lose);
+  const preview = await mergeEntity({ kind: "work", keep, lose });
+  assert.equal(preview.ok, true);
+  assert.deepEqual(preview.operations, []);
+  assert.ok(calls.every((c) => c.method === "GET"));
+  calls = mergeFixture(keep, lose);
+  const applied = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+  assert.equal(applied.ok, true);
+  assert.equal(calls.filter((c) => c.method !== "GET").length, 1);
+  assert.ok(calls.find((c) => c.method === "POST").path.endsWith("/lifecycle"));
+});
+
+test("外链并集冲突、不同身份与不同方向关系均不静默抹平", async () => {
+  const keep = entity("keep");
   for (const patch of [{ role: "official" }, { url: "https://example.org/other" }]) {
-    const result = unionInto(base, entity("other", { external_links: [{ ...base.external_links[0], ...patch }] }));
+    const result = unionInto(keep, entity("other", { external_links: [{ ...keep.external_links[0], ...patch }] }));
     assert.deepEqual(result.conflicts, ["external_links.isrc"]);
   }
-});
-
-test("预检版本变化时不把旧并集覆盖到新实体", async () => {
-  const keep = entity("keep"),
-    lose = entity("lose");
-  const calls = mergeFixture({ ...keep, version: 5 }, lose);
-  const result = await mergeEntity({
-    kind: "work",
-    keep,
-    lose,
-    dryRun: false,
-    sources,
-  });
-  assert.match(result.reason, /version_conflict/);
+  const lose = entity("lose", { translations: { "en-US": { title: "Other" } } });
+  const calls = mergeFixture(keep, lose);
+  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false });
+  assert.equal(result.ok, false);
   assert.ok(calls.every((c) => c.method === "GET"));
 });
 
-test("同名但官方身份锚点冲突、冲突字段都不能合并", async () => {
-  for (const lose of [
-    entity("lose", { external_links: [{ kind: "isrc", url: "mf://external/isrc/USAAA2600002", external_id: "USAAA2600002" }] }),
-    entity("lose", { translations: { "en-US": { title: "Other" } } }),
-  ]) {
-    const keep = entity("keep");
-    const calls = mergeFixture(keep, lose);
-    const result = await mergeEntity({
-      kind: "work",
-      keep,
-      lose,
-      dryRun: false,
-      sources,
-    });
-    assert.equal(result.ok, false);
-    assert.ok(calls.every((c) => c.method === "GET"));
-  }
-});
-
 test("收录并集保留同一表达的不同定位并避免位置冲突", () => {
-  const first = {
-    expression_id: "expr",
-    position: 1,
-    locator: { relative_to: "track", time_start_ms: 0 },
-  };
-  const second = {
-    expression_id: "expr",
-    position: 1,
-    locator: { relative_to: "track", time_start_ms: 1000 },
-  };
-  const result = unionInto(
-    { contents: [first] },
-    { contents: [second] },
-    { kind: "track" },
-  );
-  assert.equal(result.entity.contents.length, 2);
-  assert.deepEqual(
-    result.entity.contents.map((c) => c.locator.time_start_ms),
-    [0, 1000],
-  );
+  const first = { expression_id: "expr", position: 1, locator: { relative_to: "track", time_start_ms: 0 } };
+  const second = { expression_id: "expr", position: 1, locator: { relative_to: "track", time_start_ms: 1000 } };
+  const result = unionInto({ contents: [first] }, { contents: [second] }, { kind: "track" });
+  assert.deepEqual(result.entity.contents.map((c) => c.locator.time_start_ms), [0, 1000]);
   assert.equal(new Set(result.entity.contents.map((c) => c.position)).size, 2);
   assert.equal(second.position, 1);
-});
-
-test("合并身份并集复核完整候选并排除保留方 canonical aliases", async () => {
-  const keep = entity(randomUUID()),
-    lose = entity(randomUUID(), { external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] }),
-    alias = entity(randomUUID(), { state: "merged" });
-  const calls = mergeFixture(keep, lose, { candidateRows: [
-    { matched: keep, canonical: keep }, { matched: alias, canonical: keep }, { matched: lose, canonical: lose },
-  ] });
-  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources });
-  assert.equal(result.ok, true);
-  const query = calls.find((c) => c.path.endsWith("/candidates")).body;
-  assert.deepEqual(query.titles, ["Same", "Same"]);
-  assert.ok(query.external_links.some((p) => p.kind === "wikidata" && p.value === "Q123"));
-  assert.deepEqual(calls.find((c) => c.path.endsWith("/commits")).body.operations[0].reviewed_candidate_ids, [lose.id]);
-});
-
-test("合并发现第三 canonical 身份默认在全部写入前停止，显式审查后可继续", async () => {
-  const keep = entity(randomUUID()),
-    lose = entity(randomUUID(), { external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] }),
-    other = entity(randomUUID()),
-    rows = [keep, lose, other].map((e) => ({ matched: e, canonical: e }));
-  let calls = mergeFixture(keep, lose, { candidateRows: rows });
-  const blocked = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources });
-  assert.equal(blocked.reason, "identity_review_required");
-  assert.equal(blocked.partial, false);
-  assert.deepEqual(blocked.unreviewed_candidate_ids, [other.id]);
-  assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
-  calls = mergeFixture(keep, lose, { candidateRows: rows });
-  const reviewed = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs: [other.id] });
-  assert.equal(reviewed.ok, true);
-  assert.deepEqual(calls.find((c) => c.path.endsWith("/commits")).body.operations[0].reviewed_candidate_ids, [lose.id, other.id].sort());
-});
-
-test("合并身份候选按结构归属查询；错 scope、截断、未解析或失败均禁止写入", async () => {
-  for (const [kind, scopeField] of [["expression", "work_id"], ["content_unit", "work_id"], ["medium", "release_id"], ["track", "medium_id"]]) {
-    const keep = entity(randomUUID(), { kind, [scopeField]: randomUUID() }),
-      lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] });
-    const calls = mergeFixture(keep, lose);
-    const dry = await mergeEntity({ kind, keep, lose, sources });
-    assert.equal(dry.ok, true);
-    assert.equal(calls.find((c) => c.path.endsWith("/candidates")).body[scopeField], keep[scopeField]);
-    assert.deepEqual(dry.reviewed_candidate_ids, [lose.id]);
-    assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
-  }
-  const keep = entity(randomUUID(), { kind: "medium", release_id: randomUUID() }),
-    lose = entity(randomUUID(), { ...keep, id: randomUUID(), external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] });
-  for (const options of [
-    { candidateRows: [{ matched: { ...lose, release_id: randomUUID() }, canonical: lose }] },
-    { candidateRows: [{ matched: lose, canonical: null }] },
-    { candidateResponse: { basis: "postgres_repeatable_read", total: 2, complete: false, items: [{ matched: lose, canonical: lose }] } },
-    { candidateResponse: { error: "rate_limited" }, candidateStatus: 429 },
-  ]) {
-    const calls = mergeFixture(keep, lose, options);
-    const result = await mergeEntity({ kind: "medium", keep, lose, dryRun: false, sources });
-    assert.equal(result.reason, "identity_review_unverified");
-    assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
-  }
-});
-
-test("并发改变候选使合并commit返回409时不删边也不执行lifecycle", async () => {
-  const keep = entity(randomUUID()),
-    lose = entity(randomUUID(), { external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] }),
-    edge = (id, source_id) => ({ id, source_id, target_id: "agent", type: "credit_for", attributes: {}, version: 1 });
-  const calls = mergeFixture(keep, lose, { commitStatus: 409,
-    keepRels: [edge("keep-edge", keep.id)], loseRels: [edge("lose-edge", lose.id)] });
-  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources });
-  assert.equal(result.reason, "identity_candidates_changed");
-  assert.equal(result.partial, false);
-  assert.deepEqual(result.completedSteps, []);
-  assert.ok(result.identity_review.candidate_ids.includes(lose.id));
-  assert.equal(calls.some((c) => c.method === "DELETE" || c.path.endsWith("/lifecycle")), false);
-});
-
-test("合并已审列表不能包含自身、无效ID或本次未命中的第三对象", async () => {
-  const keep = entity(randomUUID()), lose = entity(randomUUID(), { external_links: [...keep.external_links, { kind: "wikidata", url: "https://www.wikidata.org/wiki/Q123", external_id: "Q123" }] });
-  for (const reviewedCandidateIDs of [[keep.id], ["not-a-uuid"], [lose.id, lose.id], null]) {
-    const calls = mergeFixture(keep, lose);
-    const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs });
-    assert.equal(result.reason, "invalid_identity_review");
-    assert.ok(calls.every((c) => c.method === "GET"));
-  }
-  const calls = mergeFixture(keep, lose);
-  const result = await mergeEntity({ kind: "work", keep, lose, dryRun: false, sources, reviewedCandidateIDs: [randomUUID()] });
-  assert.equal(result.reason, "identity_candidates_changed");
-  assert.ok(calls.every((c) => c.method === "GET" || c.path.endsWith("/candidates")));
-});
-
-test("删重复关系失败后不继续 lifecycle，并明确并集已提交", async () => {
-  const keep = entity("keep"),
-    lose = entity("lose", { attributes: { language: "ja" } });
-  const edge = (id, source_id) => ({
-    id,
-    source_id,
-    target_id: "agent",
-    type: "credit_for",
-    attributes: {},
-    version: 2,
-  });
-  const calls = mergeFixture(keep, lose, {
-    keepRels: [edge("keep-edge", keep.id)],
-    loseRels: [edge("lose-edge", lose.id)],
-    deleteStatus: 409,
-  });
-  const result = await mergeEntity({
-    kind: "work",
-    keep,
-    lose,
-    dryRun: false,
-    sources,
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.partial, true);
-  assert.equal(result.atomic, false);
-  assert.deepEqual(result.completedSteps, ["keep_union"]);
-  assert.equal(result.edgeDeletes, 0);
-  assert.equal(
-    calls.some((c) => c.path.endsWith("/lifecycle")),
-    false,
-  );
-  assert.ok(
-    calls
-      .filter((c) => c.method !== "GET")
-      .every((c) => c.body.sources[0].kind === "url"),
-  );
-});
-
-test("反方向独立关系不当作重复边删除", async () => {
-  const keep = entity("keep"),
-    lose = entity("lose");
-  const calls = mergeFixture(keep, lose, {
-    keepRels: [
-      {
-        id: "keep-edge",
-        source_id: keep.id,
-        target_id: "agent",
-        type: "related_to",
-        attributes: {},
-        version: 1,
-      },
-    ],
-    loseRels: [
-      {
-        id: "lose-edge",
-        source_id: "agent",
-        target_id: lose.id,
-        type: "related_to",
-        attributes: {},
-        version: 1,
-      },
-    ],
-  });
-  const result = await mergeEntity({
-    kind: "work",
-    keep,
-    lose,
-    dryRun: false,
-    sources,
-  });
-  assert.equal(result.ok, true);
-  assert.equal(
-    calls.some((c) => c.method === "DELETE"),
-    false,
-  );
-  assert.equal(calls.filter((c) => c.method === "POST").length, 1);
-});
-
-test("删除网络失败不当作成功，写后读取失败报告已完成步骤", async () => {
-  for (const options of [
-    { deleteNetworkFailure: true },
-    { readbackFailure: true },
-  ]) {
-    const keep = entity("keep"),
-      lose = entity("lose", { attributes: { language: "ja" } });
-    const edge = (id, source_id) => ({
-      id,
-      source_id,
-      target_id: "agent",
-      type: "credit_for",
-      attributes: {},
-      version: 2,
-    });
-    const calls = mergeFixture(keep, lose, {
-      keepRels: [edge("keep-edge", keep.id)],
-      loseRels: [edge("lose-edge", lose.id)],
-      ...options,
-    });
-    const result = await mergeEntity({
-      kind: "work",
-      keep,
-      lose,
-      dryRun: false,
-      sources,
-    });
-    assert.equal(result.ok, false);
-    assert.equal(result.partial, true);
-    assert.deepEqual(result.completedSteps, ["keep_union"]);
-    assert.equal(
-      calls.some((c) => c.path.endsWith("/lifecycle")),
-      false,
-    );
-    assert.equal(result.edgeDeletes, 0);
-  }
 });
 
 test("外部库权限或网络未知不能被归为所有类型 404", async () => {

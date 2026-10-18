@@ -163,10 +163,11 @@ function validateFieldNode(field, { depth = 0, top = false }: Record<string, any
 }
 
 function validateSources(sources) {
-  if (!Array.isArray(sources) || sources.length === 0) return "evidence_required";
+  if (sources === undefined) return null;
+  if (!Array.isArray(sources)) return "invalid_sources";
   for (const source of sources) {
     if (!isRecord(source) || Object.keys(source).some((key) => !SOURCE_KEYS.has(key))) return "invalid_source";
-    if (!["url", "publication"].includes(source.kind) || typeof source.citation !== "string" || !source.citation.trim()) {
+    if (!["url", "publication", "self"].includes(source.kind) || typeof source.citation !== "string" || !source.citation.trim()) {
       return "invalid_source";
     }
     if ((source.kind === "url" && !validHttpUrl(source.url)) || (source.url !== undefined && !validHttpUrl(source.url))) {
@@ -185,7 +186,7 @@ export function validatePlan(plan) {
     if (typeof plan.edit_note !== "string" || !plan.edit_note.trim()) return "edit_note_required";
     const sourceError = validateSources(plan.sources);
     if (sourceError) return sourceError;
-    if (!isJsonSafe(plan.field) || !isJsonSafe(plan.sources)) return "invalid_json_value";
+    if (!isJsonSafe(plan.field) || !isJsonSafe(plan.sources ?? [])) return "invalid_json_value";
     return validateFieldNode(plan.field, { top: true });
   }
   if (Object.keys(plan).some((key) => !TERM_PLAN_KEYS.has(key))) return "invalid_plan";
@@ -205,7 +206,7 @@ export function validatePlan(plan) {
   if (sourceError) return sourceError;
   try {
     cloneJson(plan.term);
-    cloneJson(plan.sources);
+    cloneJson(plan.sources ?? []);
   } catch {
     return "invalid_json_value";
   }
@@ -505,7 +506,7 @@ async function runDefinitionMutation(plan, { apply = false, requestFn = apiReque
     evidence_submission: {
       state: "not_sent",
       note: plan.edit_note,
-      sources: cloneJson(plan.sources),
+      sources: cloneJson(plan.sources ?? []),
       limitation: "来源格式已校验；工具未核实来源内容，也不能从定义回读证明来源事实。",
     },
   };
@@ -552,7 +553,7 @@ async function runDefinitionMutation(plan, { apply = false, requestFn = apiReque
           document: cloneJson(proposed.document),
           expected_etag: plan.expected_etag,
           edit_note: plan.edit_note,
-          sources: cloneJson(plan.sources),
+          sources: cloneJson(plan.sources ?? []),
         },
       },
     }),
@@ -701,13 +702,13 @@ export function usage() {
     "",
     "list/read 默认读取管理端 DefinitionConfig；--public 读取公开投影，不能用作写入源。",
     "plan 默认只预览；--apply 单次 PUT，并要求 --out 以独占方式预留结果文件。",
-    "兼容旧计划（不含 action）: expected_etag, vocabulary, term_code, term:{names?,enabled?}, edit_note, sources。",
+    "词项计划: expected_etag, vocabulary, term_code, term:{names?,enabled?}, edit_note, sources。",
     "新词项必须同时提供完整 names 与 enabled；既有词项的 names 按 locale 合并，未提交的 term 字段保留。",
     "受控字段新增计划: action=field.create, expected_etag, field_code, field, edit_note, sources；已有字段同码会拒绝。",
     "字段仅接受 group/list/number/text/boolean/date/url/multilingual 递归子集；四语 names 与顶层有效 applicable_kinds 必须齐全。",
     "group 必须有子字段；list 必须有受支持的 items Field 且不能带 fields；非 list 不能带 items。",
     "field.create 只生成新增单字段的完整 DefinitionSave；不接受任意 definitions 文档替换。最终校验以服务端 impact 为准。",
-    "名称需含 zh-CN/zh-TW/en-US 与 ja 或 ja-JP。sources 只接受 url/publication；格式不证明来源事实。",
+    "名称需含 zh-CN/zh-TW/en-US 与 ja 或 ja-JP。sources 为可选历史元数据；不自动生成来源。",
     "默认仅预览；--apply 单次 PUT 并写后完整文档等价回读，冲突或结果不明不重放。",
   ].join("\n");
 }

@@ -21,7 +21,7 @@
 
 1. `GET /api/admin/catalog-definitions`，保留完整 document 与 etag。
 2. `POST /api/admin/catalog-definitions/impact` 提交 `{document}`；issues 阻断，dangling_references 核查为已有引用欠账。
-3. `PUT /api/admin/catalog-definitions` 提交完整 `{document,expected_etag,edit_note,sources}`，再 GET 核内容与新 etag；冲突回读，不盲重试。
+3. `PUT /api/admin/catalog-definitions` 提交 `{document,expected_etag}`，可按需附修改说明和来源，再 GET 核内容与新 etag；冲突回读，不盲重试。
 
 `names` 需 zh-CN/zh-TW/en-US + ja 或 ja-JP，与实体 translations 不同。definitions 无历史、草稿或回滚；其余契约见 [API 行为](api-behavior.md)。
 
@@ -31,10 +31,10 @@
 
 ## 固定限制与清理
 
-- 八种 kind 与归属外键不能靠 GUI 扩展；普通 PUT 不改 kind/work_id/release_id/medium_id。迁移归属须按授权重建并处理引用；没有实体 DELETE。
+- 八种 kind 与归属外键不能靠 GUI 扩展；普通编辑不改 kind/work_id/release_id/medium_id。迁移归属须按授权重建并处理引用；没有实体 DELETE。
 - 表达组合、跨 Work 收录、发行版本组已有模型，见 [数据模型](data-model.md)，不要作为缺口重造结构。
-- deleted/merged 源端不可编辑，DeleteRelation 会受源端权限阻断；仅目标端终态时管理员可能可删除。必要边整理在生命周期转换前完成，失败停止。
-- entity 引用须可见；实体无草稿状态，待审核的是提交，不能把尚未应用的创建作为已存在对象引用。分页期间并发修改会移动边界，按 ID 去重不等于同一快照。
+- deleted/merged 源端不可编辑，关系删除受源端权限阻断；仅目标端终态时管理员可能可删除。必要边整理在生命周期转换前完成，失败停止。
+- entity 引用须可见；实体无草稿状态。副本中可用稳定 ID 引用自己尚未合入的新建对象，其他副本或正式目录不能把它当作已存在事实。分页期间并发修改会移动边界，按 ID 去重不等于同一快照。
 - 外部来源适配器只读，预览与查询不自动创建目录事实；旧导入写接口已移除。其它鉴权与服务边界见 [接口范围](endpoint-scope.md)。
 
 用户要求核对时，可使用 [仓内只读工具](../scripts/tools/README.md) 与 [核对参考](qa-checklist.md)。这些诊断不是编辑或提交门槛；subjects/medium 尚未补齐时仍可提交已确认的资料。

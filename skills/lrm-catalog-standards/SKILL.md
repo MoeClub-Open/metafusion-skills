@@ -15,7 +15,7 @@ description: 选择 MetaFusion 实体层级、命名作品与发行版、判断�
 | Release | 原样保留发行方为该版使用的名称，另记编号、地区、包装 |
 | Medium / Track | 实际承载单元与收录位置，`number` 保留官方编号、`position` 表示顺序 |
 
-- 正式题名中的 Season、Vol、OST 等按来源保留。中文名称采用[官方或授权本地化译名](../metafusion-curator/references/source-policy.md#中文译名)，无官方译名就用原名。
+- 正式题名中的 Season、Vol、OST 等按来源保留，不自行增加 `[CD]`、品番或版本后缀。中文名称采用[官方或授权本地化译名](../metafusion-curator/references/source-policy.md#中文译名)，无官方译名就用原名。
 - 现场、重录、伴奏、混音按内容身份区分；同名或相近时长不证明同一表达，品番与商品名也不证明新录音。缺少内容差异证据时不机械复制 Expression。
 - 歌曲录音仍属于歌曲 Work，专辑组成用相应关系；Release.subjects 声明收录 Work，Track.contents 引用实际 Expression。组成、版本组与本版曲序分别记录。
 - 多作品盒装按 subjects + Medium/Track 收录；有独立汇编创作证据时再建 Work。有实际目录再建章、集或曲目，初回附件和真实特典盘分别表达。

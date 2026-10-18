@@ -1,810 +1,206 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import test from "node:test";
-import { randomUUID } from "node:crypto";
-import { diffDocument, identityPatch, rebasePatch, runWorkspace } from "./mf-workspace.ts";
+import os from "node:os";
+import { test } from "node:test";
+import { runWorkspace, diffDocument, rebasePatch } from "./mf-workspace.ts";
 
-const clone = (x) => JSON.parse(JSON.stringify(x));
-const evidence = [{ kind: "url", citation: "Fixture primary page", url: "https://source.test/item" }];
+const origin = "https://example.com";
+const entityID = "10000000-0000-0000-0000-000000000001";
+const workspaceID = "20000000-0000-0000-0000-000000000001";
 function fixture(t) {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "mf-workspace-")),
-    dir = path.join(parent, "working");
-  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
-  const id = randomUUID(),
-    docs = new Map([
-      [
-        id,
-        {
-          id,
-          kind: "work",
-          version: 1,
-          title: "base",
-          attributes: { language: "ja" },
-          translations: { en: { title: "base" } },
-          pictures: [],
-          state: "active", review_status: "reviewed",
-        },
-      ],
-    ]),
-    receipts = new Map(),
-    calls = [];
-  const fn = async (p, o = {}) => {
-    calls.push({ p, o: clone(o) });
-    if (p.endsWith("/checkout"))
-      return {
-        status: 200,
-        body: {
-          actor_id: "fixture",
-          definitions_etag: "defs",
-          entities: o.body.entity_ids.map((id) => clone(docs.get(id))),
-          relations: [],
-        },
-      };
-    if (p.includes("/commits/") && !p.endsWith("/preview"))
-      return receipts.has(p.split("/").at(-1))
-        ? { status: 200, body: clone(receipts.get(p.split("/").at(-1))) }
-        : { status: 404, body: { error: "not_found" } };
-    if (p.endsWith("/commits/preview"))
-      return {
-        status: 200,
-        body: { id: o.body.id, applied: false, review_status: "reviewed", review_decision: "exempt", refs: {}, items: [] },
-      };
-    if (p.endsWith("/commits")) {
-      const items = o.body.operations.map((op) => {
-        const doc = docs.get(op.id),
-          rebased = rebasePatch(doc, doc, op.patch);
-        docs.set(op.id, { ...rebased.working, version: doc.version + 1 });
-        return {
-          target: op.target,
-          id: op.id,
-          version: doc.version + 1,
-          changed: true,
-          merged: false,
-        };
-      });
-      const receipt = { id: o.body.id, applied: true, review_status: "reviewed", review_decision: "exempt", refs: {}, items };
-      receipts.set(receipt.id, receipt);
-      return { status: 200, body: clone(receipt) };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mf-workspace-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let workspace: any = { id: workspaceID, owner_id: "author", name: "Task", version: 1,
+    head_commit_id: null, state: "active", members: [], objects: [], dirty_count: 0 };
+  const commits = new Map<string, any>();
+  const calls: any[] = [];
+  const main: any = { title: "Original", version: 4 };
+  let mode = "direct", throwAfter = "";
+  const requestFn: any = async (pathname, options: any = {}) => {
+    calls.push({ pathname, ...structuredClone(options) });
+    const { method = "GET", body } = options;
+    const result = (status, response) => ({ status, body: structuredClone(response) });
+    if (pathname === "/api/catalog/workspaces" && method === "POST") {
+      return result(201, workspace);
     }
-    throw new Error(`unexpected ${p}`);
+    if (pathname === "/api/catalog/workspaces" || pathname === "/api/catalog/pull-requests") {
+      return result(200, { items: [], total: 0, limit: 20, offset: 0 });
+    }
+    if (pathname.startsWith("/api/catalog/commits/")) {
+      const commit = commits.get(pathname.split("/").at(-1));
+      return result(commit ? 200 : 404, commit ?? { error: "not_found" });
+    }
+    if (pathname === `/api/catalog/workspaces/${workspaceID}` && method === "GET") return result(200, workspace);
+    if (body.expected_version !== workspace.version) return result(409, { error: "workspace_version_conflict" });
+    if (pathname.endsWith("/checkout")) {
+      workspace.objects = [{ target: "entity", id: entityID, base_version: 4, base: structuredClone(main),
+        committed: structuredClone(main), document: structuredClone(main), dirty: false }];
+      workspace.version++;
+      return result(200, workspace);
+    }
+    if (pathname.endsWith("/changes")) {
+      const operation = body.operations[0];
+      const object = workspace.objects[0];
+      if (operation.action === "update") object.document = rebasePatch(object.document, object.document, operation.patch).working;
+      object.dirty = true;
+      workspace.dirty_count = 1;
+      workspace.version++;
+      const response = result(200, { workspace, refs: {} });
+      if (throwAfter === "stage") { throwAfter = ""; throw new Error("network interruption"); }
+      return response;
+    }
+    if (pathname.endsWith("/commits") && method === "POST") {
+      const commit = { id: body.id, workspace_id: workspace.id, parent_id: workspace.head_commit_id,
+        author: { id: "author", name: "Author" }, authors: [{ id: "author", name: "Author" }], message: body.message, changes: workspace.objects.map((object) => ({
+          target: object.target, id: object.id, base_version: object.base_version, before: object.committed, after: object.document
+        })), kind: "commit", created_at: "2026-10-18T00:00:00Z", merged_at: null, merged_by: null, pull_request_id: null };
+      commits.set(body.id, structuredClone(commit));
+      workspace.head_commit_id = body.id;
+      workspace.dirty_count = 0;
+      workspace.objects.forEach((object) => { object.committed = structuredClone(object.document); object.dirty = false; });
+      workspace.version++;
+      if (throwAfter === "commit") { throwAfter = ""; throw new Error("network interruption"); }
+      return result(201, commit);
+    }
+    if (pathname.endsWith("/push")) {
+      if (body.expected_head !== workspace.head_commit_id) return result(409, { error: "workspace_head_conflict" });
+      if (mode === "conflict") return result(409, { error: "workspace_conflict", conflicts: [{ pointer: "/title", base: "Original", proposed: "Mine", current: "Theirs" }] });
+      if (mode === "pr") return result(202, { applied: false, workspace, commits: [...commits.values()], pull_request: { id: "pr", status: "open" } });
+      Object.assign(main, workspace.objects[0].document);
+      for (const commit of commits.values()) { commit.merged_at = "2026-10-18T01:00:00Z"; commit.merged_by = "maintainer"; }
+      return result(200, { applied: true, workspace, commits: [...commits.values()], pull_request: null });
+    }
+    return result(400, { error: "unexpected_request" });
   };
-  const opts = { dir, origin: "https://example.test", requestFn: fn };
-  const read = (rel) =>
-    JSON.parse(fs.readFileSync(path.join(dir, rel), "utf8"));
-  const edit = (patch) => {
-    const rel = `entities/${id}.json`,
-      doc = read(rel);
-    fs.writeFileSync(path.join(dir, rel), JSON.stringify({ ...doc, ...patch }));
-  };
-  const seal = async (extra = {}) => {
-    await runWorkspace("init", opts);
-    await runWorkspace("checkout", { ...opts, entityIDs: [id] });
-    edit({ title: "mine" });
-    return runWorkspace("commit", {
-      ...opts,
-      note: "verified edit",
-      sources: evidence,
-      reviews: { [`entity:${id}`]: [] },
-      ...extra,
-    });
-  };
-  return { dir, id, docs, receipts, calls, fn, opts, read, edit, seal };
+  const options = { dir, origin, requestFn };
+  const readState = () => JSON.parse(fs.readFileSync(path.join(dir, ".mf-workspace.json"), "utf8"));
+  return { dir, options, requestFn, calls, commits, main, readState, get workspace() { return workspace; },
+    setMode(value) { mode = value; }, throwAfter(value) { throwAfter = value; } };
 }
-
-test("pending review is confirmed acceptance and never adopts simulated versions or resends", async (t) => {
-  const f=fixture(t);await f.seal();const before=f.read(`entities/${f.id}.json`);let writes=0;
-  const requestFn=async (p,o={}) => {
-    if(p.endsWith("/commits")) {
-      writes++;
-      const receipt={id:o.body.id,applied:false,review_status:"pending_review",review_decision:"pending",refs:{},
-        items:o.body.operations.map(op=>({target:op.target,id:op.id,version:2,changed:true,merged:false}))};
-      f.receipts.set(receipt.id,receipt);return {status:202,body:receipt};
-    }
-    return f.fn(p,o);
-  };
-  const out=await runWorkspace("push",{...f.opts,requestFn,apply:true});
-  assert.equal(out.ok,true);assert.equal(out.queued,true);assert.equal(out.applied,false);
-  assert.deepEqual(f.read(`entities/${f.id}.json`),before);assert.equal(f.docs.get(f.id).version,1);
-  const recovered=await runWorkspace("receipt",{...f.opts,requestFn});
-  assert.equal(recovered.queued,true);assert.equal(writes,1);
-});
-
-test("article edits preserve other locales and structured fields through commit and push", async (t) => {
+async function prepared(t) {
   const f = fixture(t);
-  const original = f.docs.get(f.id);
-  original.translations.en.summary = "Preserve summary";
-  original.translations.ja = { title: "原題", body: "日本語本文", aliases: ["別名"] };
-  await runWorkspace("init", f.opts);
-  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
-  const markdown = path.join(f.dir, "article.md");
-  const body = "## History\n\nA sourced article 😀\n";
-  fs.writeFileSync(markdown, body);
-  const result = await runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "en", file: markdown });
-  assert.equal(result.applied, false);
-  const working = f.read(`entities/${f.id}.json`);
-  assert.deepEqual(working.attributes, original.attributes);
-  assert.deepEqual(working.translations.ja, original.translations.ja);
-  assert.equal(working.translations.en.summary, "Preserve summary");
-  assert.equal(working.translations.en.body, body);
-  const sealed = await runWorkspace("commit", { ...f.opts, note: "Add verified history", sources: evidence });
-  const request = f.read(`.mf/commits/${sealed.commit_id}.json`).request;
-  assert.deepEqual(request.operations[0].patch, [{ path: "/translations/en/body", value: body }]);
-  assert.ok(request.operations[0].source_refs.length);
-  await runWorkspace("preview", f.opts);
-  await runWorkspace("push", { ...f.opts, apply: true });
-  assert.equal(f.docs.get(f.id).translations.en.body, body);
-  assert.deepEqual(f.docs.get(f.id).translations.ja, original.translations.ja);
+  assert.equal((await runWorkspace("init", f.options)).ok, true);
+  assert.equal((await runWorkspace("checkout", { ...f.options, entityIDs: [entityID] })).ok, true);
+  return f;
+}
+const operation = (title) => [{ target: "entity" as const, action: "update" as const, id: entityID, patch: [{ path: "/title", value: title }] }];
+
+test("multiple server stages and immutable commits leave main unchanged until push", async (t) => {
+  const f = await prepared(t);
+  await runWorkspace("stage", { ...f.options, operations: operation("First") });
+  await runWorkspace("stage", { ...f.options, operations: operation("Mine") });
+  const first = await runWorkspace("commit", { ...f.options, message: "Title correction" });
+  assert.equal(first.ok, true);
+  assert.equal(f.main.title, "Original");
+  assert.equal(f.commits.size, 1);
+  await runWorkspace("stage", { ...f.options, operations: operation("Final") });
+  const second = await runWorkspace("commit", { ...f.options, message: "Follow-up correction" });
+  assert.equal(second.ok, true);
+  assert.equal(f.commits.size, 2);
+  const list = [...f.commits.values()];
+  assert.equal(list[1].parent_id, list[0].id);
+  assert.equal(list[0].changes[0].after.title, "Mine");
+  assert.equal(list[0].author.id, "author");
+  const pushed = await runWorkspace("push", f.options);
+  assert.equal(pushed.result.applied, true);
+  assert.equal(f.main.title, "Final");
+  assert.ok(f.calls.every((call) => !call.pathname.includes("/commits/preview")));
+  assert.ok(f.calls.every((call) => !(call.pathname === "/api/catalog/commits" && call.method === "POST")));
+  const staged = f.calls.filter((call) => call.pathname.endsWith("/changes"));
+  assert.ok(staged.every((call) => !Object.hasOwn(call.body.operations[0], "source_refs")));
 });
 
-test("receipt without review fields stays unknown and recovers without another write", async (t) => {
-  const f = fixture(t), sealed = await f.seal();
-  const incomplete = async (pathname, options) => {
-    const response = await f.fn(pathname, options);
-    if (pathname.endsWith("/commits")) {
-      delete response.body.review_status;
-      delete response.body.review_decision;
-    }
-    return response;
-  };
-  const result = await runWorkspace("push", { ...f.opts, requestFn: incomplete, apply: true });
-  assert.equal(result.applied, null);
-  assert.equal(f.read(".mf/state.json").pending.outcome, "unknown");
-  assert.equal(f.read(`entities/${f.id}.json`).version, 1);
-  const recovered = await runWorkspace("receipt", f.opts);
-  assert.equal(recovered.applied, true);
-  assert.equal(recovered.receipt.id, sealed.commit_id);
-  assert.equal(f.calls.filter(call => call.p.endsWith("/commits")).length, 1);
-});
-
-test("article validation leaves the working copy unchanged; a new locale needs a title", async (t) => {
-  const f = fixture(t);
-  await runWorkspace("init", f.opts);
-  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
-  const markdown = path.join(f.dir, "article.md");
-  const before = f.read(`entities/${f.id}.json`);
-  for (const [body, expected] of [["bad\0body", /invalid_article_body/], ["😀".repeat(100001), /article_too_long/]]) {
-    fs.writeFileSync(markdown, body);
-    await assert.rejects(runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "en", file: markdown }), expected);
-    assert.deepEqual(f.read(`entities/${f.id}.json`), before);
-  }
-  fs.writeFileSync(markdown, "正文");
-  await assert.rejects(runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "zh-CN", file: markdown }), /translation_title_required/);
-  await runWorkspace("article", { ...f.opts, entityIDs: [f.id], language: "zh-CN", translationTitle: "标题", file: markdown });
-  assert.deepEqual(f.read(`entities/${f.id}.json`).translations["zh-CN"], { title: "标题", body: "正文" });
-  assert.ok(!f.calls.some((call) => call.p.endsWith("/commits")));
-});
-
-test("granular diff preserves unrelated fields, arrays remain atomic, readonly mutation rejected", () => {
-  const base = {
-    id: "id",
-    version: 1,
-    title: "base",
-    attributes: { language: "ja", duration: 3 },
-    pictures: [{ url: "a" }],
-  };
-  assert.deepEqual(
-    diffDocument(
-      base,
-      { ...base, attributes: { language: "ja", duration: 4 } },
-      "entity",
-    ),
-    [{ path: "/attributes/duration", value: 4 }],
-  );
-  assert.deepEqual(
-    diffDocument(base, { ...base, pictures: [{ url: "b" }] }, "entity"),
-    [{ path: "/pictures", value: [{ url: "b" }] }],
-  );
-  assert.throws(
-    () => diffDocument(base, { ...base, version: 2 }, "entity"),
-    /immutable_field/,
-  );
-  assert.deepEqual(
-    diffDocument(
-      { attributes: null },
-      { attributes: { language: "ja" } },
-      "entity",
-    ),
-    [{ path: "/attributes/language", value: "ja" }],
-  );
-});
-test("rebase merges disjoint fields and requires explicit overlap resolution", () => {
-  const base = { title: "base", attributes: { language: "ja" } },
-    current = { title: "theirs", attributes: { language: "ja" } },
-    patch = [
-      { path: "/title", value: "ours" },
-      { path: "/attributes/language", value: "en" },
-    ];
-  assert.deepEqual(rebasePatch(base, current, patch).conflicts, ["/title"]);
-  assert.equal(
-    rebasePatch(base, current, patch, { "/title": "ours" }).working.title,
-    "ours",
-  );
-  assert.equal(
-    rebasePatch(base, current, patch, { "/title": "theirs" }).working.title,
-    "theirs",
-  );
-  const special = JSON.parse('{"attributes":{"__proto__":{"polluted":false}}}');
-  rebasePatch(special, special, [
-    { path: "/attributes/__proto__/polluted", value: true },
-  ]);
-  assert.equal({}.polluted, undefined);
-});
-test("commit auto-fills source key and source_refs so server-required evidence mapping is present", async (t) => {
-  const f = fixture(t),
-    local = await f.seal();
-  const sealed = f.read(`.mf/commits/${local.commit_id}.json`).request;
-  assert.equal(sealed.sources.length, 1);
-  assert.equal(sealed.sources[0].key, "s1");
-  assert.ok(sealed.operations.every((op) => Array.isArray(op.source_refs) && op.source_refs.length === 1 && op.source_refs[0].source === "s1"));
-  // Push body must carry the same mapping (server rejects missing source_refs).
-  await runWorkspace("push", { ...f.opts, apply: true });
-  const push = f.calls.find((c) => c.p.endsWith("/commits") && c.o?.method !== undefined ? true : c.p.endsWith("/commits"));
-  assert.ok(push);
-  const body = push.o.body;
-  assert.equal(body.sources[0].key, "s1");
-  assert.equal(body.operations[0].source_refs[0].source, "s1");
-});
-test("generated evidence keys avoid explicit keys and invalid mappings fail before sealing", async (t) => {
-  const f = fixture(t);
-  const sealed = await f.seal({ sources: [{...evidence[0],key:"s1"},{...evidence[0]}] });
-  const request = f.read(`.mf/commits/${sealed.commit_id}.json`).request;
-  assert.deepEqual(request.sources.map(source => source.key),["s1","s2"]);
-  assert.deepEqual(request.operations[0].source_refs,[{source:"s1"},{source:"s2"}]);
-  for (const [sources,error] of [
-    [[{...evidence[0],key:42}],"invalid_source_key"],
-    [[{...evidence[0],key:"same"},{...evidence[0],key:"same"}],"duplicate_source_key"],
-    [[{...evidence[0],pointers:["/title"]}],"source_pointers_not_allowed"],
-    [[{...evidence[0],scope:"commit"}],"source_scope_not_allowed"],
-  ]) {
-    const invalid = fixture(t);
-    await assert.rejects(invalid.seal({sources}),new RegExp(error));
-  }
-});
-test("commit is local, push atomic receipt refreshes base, no entity PUT", async (t) => {
-  const f = fixture(t),
-    local = await f.seal();
-  assert.equal(
-    f.calls.some((c) => c.p.endsWith("/commits")),
-    false,
-  );
-  const r = await runWorkspace("push", { ...f.opts, apply: true });
-  assert.equal(r.ok, true);
-  assert.equal(r.receipt.id, local.commit_id);
-  assert.equal(f.read(".mf/state.json").pending, null);
-  assert.equal(f.read(`entities/${f.id}.json`).version, 2);
-  assert.equal(
-    f.calls.some((c) => c.o.method === "PUT"),
-    false,
-  );
-});
-test("preview validates complete receipt and keeps sealed pending commit", async (t) => {
-  const f = fixture(t),
-    local = await f.seal();
-  const malformed = await runWorkspace("preview", f.opts);
-  assert.equal(malformed.ok, false);
-  const requestFn = async (p, o) =>
-    p.endsWith("/preview")
-      ? {
-          status: 200,
-          body: {
-            id: o.body.id,
-            applied: false,
-            review_status: "reviewed", review_decision: "exempt",
-            refs: {},
-            items: [
-              {
-                target: "entity",
-                id: f.id,
-                version: 2,
-                changed: true,
-                merged: false,
-              },
-            ],
-          },
-        }
-      : f.fn(p, o);
-  const result = await runWorkspace("preview", { ...f.opts, requestFn });
-  assert.equal(result.ok, true);
-  assert.equal(f.read(".mf/state.json").pending.id, local.commit_id);
-  assert.equal(f.docs.get(f.id).version, 1);
-  assert.equal(f.receipts.size, 0);
-});
-test("entity creation requires identity review and seals explicit local references", async (t) => {
-  const f = fixture(t);
-  await runWorkspace("init", f.opts);
-  const file = path.join(f.dir, "source.json");
-  fs.writeFileSync(
-    file,
-    JSON.stringify({
-      kind: "expression",
-      title: "Recording",
-      work_id: { $ref: "work" },
-    }),
-  );
-  await assert.rejects(
-    runWorkspace("create", {
-      ...f.opts,
-      target: "entity",
-      ref: "recording",
-      file,
-    }),
-    /identity_review_required/,
-  );
-  const review = { reviewed_candidate_ids: [] };
-  await runWorkspace("create", {
-    ...f.opts,
-    target: "entity",
-    ref: "recording",
-    file,
-    review,
-  });
-  const local = await runWorkspace("commit", {
-    ...f.opts,
-    note: "fixture",
-    sources: evidence,
-  });
-  const op = f.read(`.mf/commits/${local.commit_id}.json`).request
-    .operations[0];
-  assert.deepEqual(op.reviewed_candidate_ids, []);
-  assert.deepEqual(op.document.work_id, { $ref: "work" });
-  assert.equal(
-    f.calls.some((c) => c.p.endsWith("/commits")),
-    false,
-  );
-});
-test("lost response recovers durable receipt without sending another mutation", async (t) => {
-  const f = fixture(t);
-  await f.seal();
-  const requestFn = async (p, o) => {
-    const r = await f.fn(p, o);
-    return p.endsWith("/commits")
-      ? { status: 0, body: { error: "network" } }
-      : r;
-  };
-  const r = await runWorkspace("push", { ...f.opts, requestFn, apply: true });
-  assert.equal(r.ok, true);
-  assert.equal(f.calls.filter((c) => c.p.endsWith("/commits")).length, 1);
-});
-test("unknown push remains sealed; preview and rebase cannot turn uncertainty into a new ID", async (t) => {
-  const f = fixture(t),
-    sealed = await f.seal();
-  const unknown = async (p, o) =>
-    p.endsWith("/commits")
-      ? { status: 0, body: { error: "network" } }
-      : f.fn(p, o);
-  const r = await runWorkspace("push", {
-    ...f.opts,
-    requestFn: unknown,
-    apply: true,
-  });
-  assert.equal(r.applied, null);
-  await assert.rejects(
-    runWorkspace("preview", f.opts),
-    /unknown_push_requires_receipt_same_id/,
-  );
-  await assert.rejects(
-    runWorkspace("rebase", f.opts),
-    /unknown_push_requires_receipt_same_id/,
-  );
-  await assert.rejects(
-    runWorkspace("commit", { ...f.opts, note: "again", sources: [{}] }),
-    /pending_commit/,
-  );
-  const rateLimited = async (p, o) =>
-    p.endsWith("/commits")
-      ? { status: 429, body: { error: "rate_limited" } }
-      : f.fn(p, o);
-  const again = await runWorkspace("push", {
-    ...f.opts,
-    requestFn: rateLimited,
-    apply: true,
-  });
-  assert.equal(again.applied, null);
-  assert.equal(f.read(".mf/state.json").pending.id, sealed.commit_id);
-  assert.equal(f.read(".mf/state.json").pending.outcome, "unknown");
-});
-test("explicit conflict rebases with new ID, keeping old immutable commit", async (t) => {
-  const f = fixture(t),
-    local = await f.seal();
-  f.docs.set(f.id, { ...f.docs.get(f.id), title: "theirs", version: 2 });
-  const reject = async (p, o) =>
-    p.endsWith("/commits")
-      ? { status: 409, body: { error: "commit_conflict" } }
-      : f.fn(p, o);
-  await runWorkspace("push", { ...f.opts, requestFn: reject, apply: true });
-  const conflict = await runWorkspace("rebase", f.opts);
-  assert.equal(conflict.reason, "rebase_conflict");
-  const newCommit = await runWorkspace("rebase", {
-    ...f.opts,
-    resolutions: { [`entity:${f.id}`]: { "/title": "ours" } },
-  });
-  assert.notEqual(newCommit.commit_id, local.commit_id);
-  assert.equal(newCommit.supersedes, local.commit_id);
-  assert.equal(
-    f.read(`.mf/commits/${local.commit_id}.json`).request.operations[0]
-      .base_version,
-    1,
-  );
-  assert.equal(
-    f.read(`.mf/commits/${newCommit.commit_id}.json`).request.operations[0]
-      .base_version,
-    2,
-  );
-});
-test("known transaction busy preserves commit and permits explicit same-ID push", async (t) => {
-  const f = fixture(t), sealed = await f.seal();
-  const busy = async (p, o) => p.endsWith("/commits")
-    ? { status: 503, body: { error: "transaction_busy", applied: false } } : f.fn(p, o);
-  const result = await runWorkspace("push", { ...f.opts, requestFn: busy, apply: true });
-  assert.equal(result.applied, false);
-  assert.equal(result.reason, "push_busy_keep_same_commit");
-  assert.equal(result.result.error, "transaction_busy");
-  assert.equal(f.read(".mf/state.json").pending.id, sealed.commit_id);
-  assert.equal(f.read(".mf/state.json").pending.outcome, "rejected");
-  const retry = await runWorkspace("push", { ...f.opts, apply: true });
-  assert.equal(retry.ok, true);
-  assert.equal(retry.receipt.id, sealed.commit_id);
-});
-test("a busy response cannot clear uncertainty from a previous push", async (t) => {
-  const f = fixture(t), sealed = await f.seal();
-  const failed = async (p, o) => p.endsWith("/commits") ? { status: 0, body: {} } : f.fn(p,o);
-  await runWorkspace("push", { ...f.opts, requestFn: failed, apply: true });
-  const busy = async (p, o) => p.endsWith("/commits")
-    ? { status: 503, body: { error: "transaction_busy", applied: false } } : f.fn(p, o);
-  const result = await runWorkspace("push", { ...f.opts, requestFn: busy, apply: true });
-  assert.equal(result.applied, null);
-  assert.equal(f.read(".mf/state.json").pending.id, sealed.commit_id);
-  assert.equal(f.read(".mf/state.json").pending.outcome, "unknown");
-  await assert.rejects(runWorkspace("rebase", f.opts), /unknown_push_requires_receipt_same_id/);
-});
-test("dirty checkout, origin mismatch, tampered commit, stale local lock refuse", async (t) => {
-  const f = fixture(t),
-    local = await f.seal();
-  await assert.rejects(
-    runWorkspace("status", { ...f.opts, origin: "https://other.test" }),
-    /origin_mismatch/,
-  );
-  const commitFile = path.join(f.dir, `.mf/commits/${local.commit_id}.json`),
-    corrupt = f.read(`.mf/commits/${local.commit_id}.json`);
-  corrupt.request.edit_note = "changed";
-  fs.writeFileSync(commitFile, JSON.stringify(corrupt));
-  await assert.rejects(
-    runWorkspace("push", { ...f.opts, apply: true }),
-    /integrity_failure/,
-  );
-  fs.writeFileSync(path.join(f.dir, ".mf/lock"), "");
-  await assert.rejects(runWorkspace("status", f.opts), /EEXIST/);
-});
-test("edits after a successful push refresh the baseline and remain ready for another commit", async (t) => {
-  const f = fixture(t);
-  await f.seal();
-  const requestFn = async (p, o) => {
-    const r = await f.fn(p, o);
-    if (p.endsWith("/commits")) f.edit({ title: "extra edit" });
-    return r;
-  };
-  const r = await runWorkspace("push", { ...f.opts, requestFn, apply: true });
-  assert.equal(r.ok, true);
-  assert.equal(r.applied, true);
-  assert.equal(f.read(`entities/${f.id}.json`).title, "extra edit");
-  assert.equal(f.read(`entities/${f.id}.json`).version, 2);
-  assert.equal(f.read(".mf/state.json").pending, null);
-  assert.equal(f.read(".mf/state.json").entries[0].base.title, "mine");
-  assert.deepEqual((await runWorkspace("status", f.opts)).changes[0].patch, [{ path: "/title", value: "extra edit" }]);
-  const next = await runWorkspace("commit", { ...f.opts, note: "next", sources: evidence, reviews: { [`entity:${f.id}`]: [] } });
-  assert.ok(next.commit_id);
-});
-
-test("omitted object keys are preserved; null and explicit deletion stay distinct", () => {
-  const base = { title: "base", attributes: { language: "ja", duration: 3 } };
-  const working = { attributes: { language: "en" } };
-  assert.deepEqual(diffDocument(base, working, "entity"), [{ path: "/attributes/language", value: "en" }]);
-  assert.deepEqual(diffDocument(base, { ...base, attributes: null }, "entity"), [{ path: "/attributes", value: null }]);
-  assert.deepEqual(diffDocument(base, working, "entity", ["/attributes/duration"]), [
-    { path: "/attributes/language", value: "en" }, { path: "/attributes/duration", remove: true },
-  ]);
-  for (const p of ["/attributes/missing", "/attributes/language", "/version", "/attributes/bad~escape"])
-    assert.throws(() => diffDocument(base, working, "entity", [p]), /invalid_explicit_removal/);
-});
-
-test("status and an omission-only commit explicitly report preserved keys without sealing deletion", async (t) => {
-  const f = fixture(t);
-  await runWorkspace("init", f.opts);
-  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
-  const doc = f.read(`entities/${f.id}.json`); delete doc.attributes.language;
-  fs.writeFileSync(path.join(f.dir, `entities/${f.id}.json`), JSON.stringify(doc));
-  const status = await runWorkspace("status", f.opts);
-  assert.deepEqual(status.changes[0].patch, []);
-  assert.deepEqual(status.changes[0].ignored_omissions, ["/attributes/language"]);
-  const result = await runWorkspace("commit", { ...f.opts, note: "edit", sources: evidence });
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "omitted_keys_preserved_use_explicit_remove");
-  assert.deepEqual(result.ignored_omissions[0].paths, ["/attributes/language"]);
-  assert.equal(f.read(".mf/state.json").pending, null);
-});
-
-test("explicit removal seals only the approved path and survives a disjoint rebase", async (t) => {
-  const f = fixture(t);
-  await runWorkspace("init", f.opts);
-  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
-  f.edit({ attributes: {} });
-  await assert.rejects(runWorkspace("commit", { ...f.opts, note: "remove", sources: evidence,
-    removals: ["entity:missing:/attributes/language"] }), /invalid_explicit_removal_target/);
-  const local = await runWorkspace("commit", { ...f.opts, note: "remove", sources: evidence,
-    removals: [`entity:${f.id}:/attributes/language`] });
-  assert.deepEqual(local.ignored_omissions, []);
-  assert.deepEqual(f.read(`.mf/commits/${local.commit_id}.json`).request.operations[0].patch,
-    [{ path: "/attributes/language", remove: true }]);
-  f.docs.set(f.id, { ...f.docs.get(f.id), title: "theirs", version: 2 });
-  await runWorkspace("push", { ...f.opts, apply: true, requestFn: async (p, o) => p.endsWith("/commits")
-    ? { status: 409, body: { error: "commit_conflict" } } : f.fn(p, o) });
-  const rebased = await runWorkspace("rebase", f.opts);
-  assert.deepEqual(f.read(`.mf/commits/${rebased.commit_id}.json`).request.operations[0].patch,
-    [{ path: "/attributes/language", remove: true }]);
-  await runWorkspace("push", { ...f.opts, apply: true });
-  assert.deepEqual(f.docs.get(f.id).attributes, {});
-  assert.equal(f.docs.get(f.id).title, "theirs");
-});
-
-test("identity review follows server title, translation ancestor and external ID patch rules", () => {
-  for (const p of ["/title", "/external_links", "/external_links/wikidata", "/translations", "/translations/ja", "/translations/ja/title"])
-    assert.equal(identityPatch([{ path: p, value: null }]), true, p);
-  for (const p of ["/attributes/language", "/translations/ja/summary", "/translations/ja/aliases"])
-    assert.equal(identityPatch([{ path: p, value: null }]), false, p);
-});
-
-test("identity updates require explicit canonical reviews, nonidentity updates reject them", async (t) => {
-  const f = fixture(t);
-  await assert.rejects(f.seal({ reviews: {} }), /identity_review_required/);
-  await assert.rejects(runWorkspace("commit", { ...f.opts, note: "edit", sources: evidence,
-    reviews: { [`entity:${f.id}`]: [f.id, f.id] } }), /invalid_identity_review/);
-  await assert.rejects(runWorkspace("commit", { ...f.opts, note: "edit", sources: evidence,
-    reviews: { [`entity:${f.id}`]: ["@local:another"] } }), /invalid_identity_review/);
-  f.edit({ title: "base", attributes: { language: "en" } });
-  await assert.rejects(runWorkspace("commit", { ...f.opts, note: "edit", sources: evidence,
-    reviews: { [`entity:${f.id}`]: [] } }), /invalid_identity_review/);
-  const local = await runWorkspace("commit", { ...f.opts, note: "edit", sources: evidence });
-  assert.equal(Object.hasOwn(f.read(`.mf/commits/${local.commit_id}.json`).request.operations[0], "reviewed_candidate_ids"), false);
-});
-
-test("source eligibility rejects self, instance aliases and malformed URLs before sealing", async (t) => {
-  for (const sources of [
-    [{ kind: "self", citation: "internal" }],
-    [{ kind: "url", citation: "internal", url: "https://example.test/catalog/item" }],
-    [{ kind: "publication", citation: "internal", url: "https://WWW.FINDVERSE.CC./catalog/item" }],
-    [{ kind: "url", citation: "internal", url: "https://blocked.test/item" }],
-  ]) {
-    const f = fixture(t);
-    await assert.rejects(f.seal({ sources, blockedHosts: ["blocked.test"] }), /source_not_eligible/);
-    assert.equal(f.read(".mf/state.json").pending, null);
-    assert.deepEqual(fs.readdirSync(path.join(f.dir, ".mf/commits")), []);
-  }
-  for (const source of [
-    { kind: "url", citation: "bad", url: "file:///tmp/source" },
-    { kind: "url", citation: "bad", url: "https://secret@source.test/" },
-    { kind: "url", citation: "bad" },
-    { kind: "publication", citation: "book", url: "not a url" },
-  ]) {
-    const f = fixture(t);
-    await assert.rejects(f.seal({ sources: [source] }), /invalid_source/);
-  }
-  const f = fixture(t);
-  assert.ok((await f.seal({ sources: [{ kind: "publication", citation: "Printed title page, ISBN 978..." }] })).commit_id);
-});
-
-test("applied checkout failure recovers on receipt without another mutation", async (t) => {
-  const f = fixture(t), local = await f.seal();
-  const requestFn = async (p, o) => p.endsWith("/checkout") && f.receipts.size
-    ? { status: 503, body: { error: "transaction_busy" } } : f.fn(p, o);
-  const result = await runWorkspace("push", { ...f.opts, apply: true, requestFn });
-  assert.equal(result.reason, "receipt_confirmed_checkout_pending");
-  assert.equal(f.read(".mf/state.json").pending.outcome, "applied");
-  const recovered = await runWorkspace("receipt", f.opts);
-  assert.equal(recovered.ok, true);
-  assert.equal(recovered.receipt.id, local.commit_id);
-  assert.equal(f.read(".mf/state.json").pending, null);
-  assert.equal(f.calls.filter((c) => c.p.endsWith("/commits")).length, 1);
-});
-
-test("receipt refresh conflict preserves local edits and accepts an explicit resolution", async (t) => {
-  const f = fixture(t);
-  await f.seal();
-  const requestFn = async (p, o) => {
-    const r = await f.fn(p, o);
-    if (p.endsWith("/commits")) {
-      f.edit({ title: "extra" });
-      f.docs.set(f.id, { ...f.docs.get(f.id), title: "another editor", version: 3 });
-    }
-    return r;
-  };
-  const result = await runWorkspace("push", { ...f.opts, requestFn, apply: true });
-  assert.equal(result.reason, "receipt_refresh_conflict");
-  assert.deepEqual(result.conflicts[0].paths, ["/title"]);
-  assert.equal(f.read(`entities/${f.id}.json`).title, "extra");
-  assert.equal((await runWorkspace("receipt", f.opts)).reason, "receipt_refresh_conflict");
-  const resolved = await runWorkspace("receipt", { ...f.opts, resolutions: { [`entity:${f.id}`]: { "/title": "ours" } } });
-  assert.equal(resolved.ok, true);
-  assert.equal(f.read(".mf/state.json").pending, null);
-  assert.equal(f.read(".mf/state.json").entries[0].base.title, "another editor");
-  assert.equal(f.read(`entities/${f.id}.json`).title, "extra");
-  assert.equal(f.calls.filter((c) => c.p.endsWith("/commits")).length, 1);
-});
-
-test("transient locked rename retries atomically without copying over the target", async (t) => {
-  const f = fixture(t);
-  await f.seal();
-  const rename = fs.renameSync, stateFile = path.join(f.dir, ".mf/state.json"), original = fs.readFileSync(stateFile, "utf8");
-  let failures = 0;
-  t.mock.method(fs, "copyFileSync", () => { throw new Error("non_atomic_copy_forbidden"); });
-  t.mock.method(fs, "renameSync", (from, to) => {
-    if (to === stateFile && failures++ < 2) {
-      assert.equal(fs.readFileSync(stateFile, "utf8"), original);
-      throw Object.assign(new Error("busy"), { code: "EBUSY" });
-    }
-    return rename(from, to);
-  });
-  const result = await runWorkspace("push", { ...f.opts, apply: true });
-  assert.equal(result.ok, true);
-  assert.ok(failures >= 3);
-});
-
-test("receipt file lock failure keeps the same commit and recovers without resending", async (t) => {
-  const f = fixture(t), local = await f.seal();
-  const rename = fs.renameSync;
-  const mock = t.mock.method(fs, "renameSync", (from, to) => {
-    if (to === path.join(f.dir, `.mf/receipts/${local.commit_id}.json`))
-      throw Object.assign(new Error("locked"), { code: "EPERM" });
-    return rename(from, to);
-  });
-  await assert.rejects(runWorkspace("push", { ...f.opts, apply: true }), /locked/);
-  assert.equal(f.read(".mf/state.json").pending.id, local.commit_id);
-  assert.equal(f.read(".mf/state.json").pending.outcome, "unknown");
-  mock.mock.restore();
-  assert.equal((await runWorkspace("receipt", f.opts)).ok, true);
-  assert.equal(f.calls.filter((c) => c.p.endsWith("/commits")).length, 1);
-});
-
-test("durable refresh journal preserves extra edits after final state replacement fails", async (t) => {
-  const f = fixture(t), local = await f.seal();
-  const rename = fs.renameSync;
-  const mock = t.mock.method(fs, "renameSync", (from, to) => {
-    if (to === path.join(f.dir, ".mf/state.json") && JSON.parse(fs.readFileSync(from)).pending === null)
-      throw Object.assign(new Error("state locked"), { code: "EBUSY" });
-    return rename(from, to);
-  });
-  const requestFn = async (p, o) => { const r = await f.fn(p, o); if (p.endsWith("/commits")) f.edit({ title: "extra" }); return r; };
-  await assert.rejects(runWorkspace("push", { ...f.opts, requestFn, apply: true }), /state locked/);
-  assert.equal(f.read(`entities/${f.id}.json`).version, 2);
-  assert.equal(f.read(`entities/${f.id}.json`).title, "extra");
-  assert.equal(f.read(`.mf/refresh/${local.commit_id}.json`).format, 2);
-  mock.mock.restore();
-  f.edit({ attributes: { language: "en" } });
-  assert.equal((await runWorkspace("receipt", f.opts)).ok, true);
-  assert.equal(f.read(".mf/state.json").pending, null);
-  assert.equal(f.read(`entities/${f.id}.json`).title, "extra");
-  assert.equal(f.read(`entities/${f.id}.json`).attributes.language, "en");
-  assert.equal(f.calls.filter((c) => c.p.endsWith("/commits")).length, 1);
-});
-
-test("partially refreshed files recover against their own journal baseline", async (t) => {
-  const f = fixture(t), secondID = randomUUID();
-  f.docs.set(secondID, { ...clone(f.docs.get(f.id)), id: secondID });
-  await runWorkspace("init", f.opts);
-  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id, secondID] });
-  f.edit({ title: "mine" });
-  const secondFile = path.join(f.dir, `entities/${secondID}.json`);
-  fs.writeFileSync(secondFile, JSON.stringify({ ...f.read(`entities/${secondID}.json`), title: "mine2" }));
-  await runWorkspace("commit", { ...f.opts, note: "two items", sources: evidence,
-    reviews: { [`entity:${f.id}`]: [], [`entity:${secondID}`]: [] } });
-  const rename = fs.renameSync;
-  const mock = t.mock.method(fs, "renameSync", (from, to) => {
-    if (to === secondFile) throw Object.assign(new Error("second locked"), { code: "EPERM" });
-    return rename(from, to);
-  });
-  const requestFn = async (p, o) => {
-    const r = await f.fn(p, o);
-    if (p.endsWith("/commits")) {
-      f.edit({ title: "extra" });
-      fs.writeFileSync(secondFile, JSON.stringify({ ...f.read(`entities/${secondID}.json`), title: "extra2" }));
-    }
-    return r;
-  };
-  await assert.rejects(runWorkspace("push", { ...f.opts, requestFn, apply: true }), /second locked/);
-  assert.equal(f.read(`entities/${f.id}.json`).version, 2);
-  assert.equal(f.read(`entities/${secondID}.json`).version, 1);
-  mock.mock.restore();
-  assert.equal((await runWorkspace("receipt", f.opts)).ok, true);
-  assert.equal(f.read(`entities/${f.id}.json`).title, "extra");
-  assert.equal(f.read(`entities/${secondID}.json`).title, "extra2");
-  assert.equal(f.read(`entities/${secondID}.json`).version, 2);
-  assert.equal(f.read(".mf/state.json").pending, null);
-  assert.equal(f.calls.filter((c) => c.p.endsWith("/commits")).length, 1);
-});
-
-test("creation receipt adopts server identity while preserving later edits", async (t) => {
-  const f = fixture(t);
-  await runWorkspace("init", f.opts);
-  const source = path.join(f.dir, "source.json");
-  fs.writeFileSync(source, JSON.stringify({ kind: "work", title: "new", attributes: {} }));
-  await runWorkspace("create", { ...f.opts, target: "entity", ref: "new_work", file: source,
-    review: { reviewed_candidate_ids: [] } });
-  const local = await runWorkspace("commit", { ...f.opts, note: "create", sources: evidence });
-  const requestFn = async (p, o) => {
-    if (!p.endsWith("/commits")) return f.fn(p, o);
-    const doc = { id: f.id, kind: "work", version: 1, title: "new", attributes: {} };
-    f.docs.set(f.id, doc);
-    const receipt = { id: o.body.id, applied: true, review_status: "reviewed", review_decision: "exempt", refs: { new_work: f.id },
-      items: [{ target: "entity", id: f.id, version: 1, changed: true, merged: false }] };
-    f.receipts.set(receipt.id, receipt);
-    fs.writeFileSync(path.join(f.dir, "entities/new-new_work.json"), JSON.stringify({ kind: "work", title: "extra", attributes: {} }));
-    return { status: 200, body: receipt };
-  };
-  const pushed = await runWorkspace("push", { ...f.opts, requestFn, apply: true });
+test("ordinary push opens PR and preserves published facts", async (t) => {
+  const f = await prepared(t);
+  await runWorkspace("stage", { ...f.options, operations: operation("Mine") });
+  await runWorkspace("commit", { ...f.options, message: "Correction" });
+  f.setMode("pr");
+  const pushed = await runWorkspace("push", { ...f.options, title: "Fix title" });
+  assert.equal(pushed.status, 202);
   assert.equal(pushed.ok, true);
-  assert.equal(pushed.receipt.id, local.commit_id);
-  const state = f.read(".mf/state.json");
-  assert.equal(state.pending, null);
-  assert.equal(state.entries[0].id, f.id);
-  assert.equal(state.entries[0].base.title, "new");
-  assert.equal(f.read("entities/new-new_work.json").title, "extra");
-  assert.equal(f.read("entities/new-new_work.json").version, 1);
+  assert.equal(pushed.result.applied, false);
+  assert.equal(pushed.result.pull_request.status, "open");
+  assert.equal(f.main.title, "Original");
 });
 
-test("commit seals source keys and maps every operation to source_refs", async (t) => {
-  const f = fixture(t),
-    local = await f.seal();
-  const sealed = f.read(`.mf/commits/${local.commit_id}.json`).request;
-  assert.deepEqual(sealed.sources, [{ ...evidence[0], key: "s1" }]);
-  assert.deepEqual(sealed.operations[0].source_refs, [{ source: "s1" }]);
-  const multi = fixture(t);
-  await runWorkspace("init", multi.opts);
-  await runWorkspace("checkout", { ...multi.opts, entityIDs: [multi.id] });
-  multi.edit({ title: "mine" });
-  const keyed = await runWorkspace("commit", {
-    ...multi.opts,
-    note: "keyed",
-    sources: [
-      { kind: "url", citation: "first", url: "https://source.test/a", key: "official" },
-      { kind: "url", citation: "second", url: "https://source.test/b" },
-    ],
-    reviews: { [`entity:${multi.id}`]: [] },
-  });
-  const keyedSealed = multi.read(`.mf/commits/${keyed.commit_id}.json`).request;
-  assert.deepEqual(keyedSealed.sources.map((s) => s.key), ["official", "s1"]);
-  assert.deepEqual(keyedSealed.operations[0].source_refs, [{ source: "official" }, { source: "s1" }]);
-  for (const bad of [
-    [{ ...evidence[0], key: "1bad" }],
-    [{ ...evidence[0], key: "dup" }, { ...evidence[0], key: "dup" }],
-  ]) {
-    const g = fixture(t);
-    await assert.rejects(g.seal({ sources: bad }), /invalid_source_key|duplicate_source_key/);
-  }
-  const rebaseFixture = fixture(t),
-    first = await rebaseFixture.seal();
-  rebaseFixture.docs.set(rebaseFixture.id, { ...rebaseFixture.docs.get(rebaseFixture.id), title: "theirs", version: 2 });
-  await runWorkspace("push", { ...rebaseFixture.opts, apply: true, requestFn: async (p, o) => p.endsWith("/commits")
-    ? { status: 409, body: { error: "commit_conflict" } } : rebaseFixture.fn(p, o) });
-  const rebased = await runWorkspace("rebase", { ...rebaseFixture.opts,
-    resolutions: { [`entity:${rebaseFixture.id}`]: { "/title": "ours" } } });
-  const rebasedSealed = rebaseFixture.read(`.mf/commits/${rebased.commit_id}.json`).request;
-  assert.deepEqual(rebasedSealed.sources, [{ ...evidence[0], key: "s1" }]);
-  assert.deepEqual(rebasedSealed.operations[0].source_refs, [{ source: "s1" }]);
-  assert.notEqual(rebased.commit_id, first.commit_id);
+test("a reviewer accepts workspace:null without fetching or substituting a live worktree", async (t) => {
+  const f = await prepared(t);
+  const before = structuredClone(f.readState().workspace);
+  const calls: Array<{ pathname: string; method: string }> = [];
+  const requestFn: any = async (pathname, options: any = {}) => {
+    calls.push({ pathname, method: options.method ?? "GET" });
+    if (pathname === "/api/catalog/pull-requests/review-target")
+      return { status: 200, body: { id: "review-target", workspace_id: "foreign-private-workspace", version: 3, source_head_id: "frozen-head" } };
+    if (pathname === "/api/catalog/pull-requests/review-target/merge") {
+      assert.deepEqual(options.body, { expected_version: 3, expected_head: "frozen-head" });
+      return { status: 200, body: { applied: true, workspace: null, commits: [], pull_request: { id: "review-target", status: "merged" } } };
+    }
+    return f.requestFn(pathname, options);
+  };
+  const result = await runWorkspace("pr-merge", { ...f.options, pullRequestID: "review-target", requestFn });
+  assert.equal(result.ok, true);
+  assert.equal(result.workspace, null);
+  assert.equal(result.result.workspace, null);
+  assert.deepEqual(f.readState().workspace, before);
+  assert.equal(calls.filter((call) => call.method === "GET" && call.pathname.includes("/workspaces/")).length, 0);
 });
 
-test("unknown dynamic paths remain in the sealed patch and preview reports rejection", async (t) => {
-  const f = fixture(t);
-  await runWorkspace("init", f.opts);
-  await runWorkspace("checkout", { ...f.opts, entityIDs: [f.id] });
-  f.edit({ attributes: { language: "ja", unknown_key: "unexpected" } });
-  const local = await runWorkspace("commit", { ...f.opts, note: "edit", sources: evidence });
-  assert.deepEqual(f.read(`.mf/commits/${local.commit_id}.json`).request.operations[0].patch,
-    [{ path: "/attributes/unknown_key", value: "unexpected" }]);
-  const result = await runWorkspace("preview", { ...f.opts, requestFn: async () =>
-    ({ status: 400, body: { error: "unknown_path" } }) });
-  assert.equal(result.ok, false);
-  assert.equal(result.result.error, "unknown_path");
-  assert.equal(f.read(".mf/state.json").pending.id, local.commit_id);
+test("a concurrent editor cannot silently replace the last observed workspace", async (t) => {
+  const f = await prepared(t);
+  f.workspace.version++;
+  const staged = await runWorkspace("stage", { ...f.options, operations: operation("Mine") });
+  assert.equal(staged.status, 409);
+  assert.equal(f.workspace.objects[0].document.title, "Original");
+  assert.equal(f.readState().workspace.version, 2);
+  await runWorkspace("status", f.options);
+  assert.equal(f.readState().workspace.version, 3);
+});
+
+test("a lost commit response recovers the same immutable ID without reposting", async (t) => {
+  const f = await prepared(t);
+  await runWorkspace("stage", { ...f.options, operations: operation("Mine") });
+  f.throwAfter("commit");
+  const pending = await runWorkspace("commit", { ...f.options, message: "Correction" });
+  assert.equal(pending.ok, false);
+  const id = f.readState().pending.body.id;
+  assert.equal(f.commits.size, 1);
+  await assert.rejects(runWorkspace("commit", { ...f.options, message: "Again" }), /request_result_unknown/);
+  const receipt = await runWorkspace("receipt", f.options);
+  assert.equal(receipt.ok, true);
+  assert.equal(receipt.commit.id, id);
+  assert.equal(f.readState().pending, undefined);
+  assert.equal(f.calls.filter((call) => call.pathname.endsWith("/commits") && call.method === "POST").length, 1);
+});
+
+test("same-field conflict preserves the fork and presents the complete server conflict", async (t) => {
+  const f = await prepared(t);
+  await runWorkspace("stage", { ...f.options, operations: operation("Mine") });
+  await runWorkspace("commit", { ...f.options, message: "Correction" });
+  f.setMode("conflict");
+  const result = await runWorkspace("push", f.options);
+  assert.equal(result.status, 409);
+  assert.equal(f.workspace.objects[0].document.title, "Mine");
+  assert.equal(f.main.title, "Original");
+  // publicFailure preserves structured conflict details for human resolution.
+  assert.ok(JSON.stringify(result.result).includes("workspace_conflict"));
+});
+
+test("local snapshot is instance-bound and files contain no credentials", async (t) => {
+  const f = await prepared(t);
+  await assert.rejects(runWorkspace("status", { ...f.options, origin: "https://other.example" }), /origin_mismatch/);
+  assert.deepEqual(fs.readdirSync(f.dir), [".mf-workspace.json"]);
+  assert.equal(Object.hasOwn(f.readState(), "token"), false);
+});
+
+test("sparse patches preserve omitted languages; deletion is explicit", () => {
+  const base = { title: "Original", translations: { "en-US": { title: "Original", body: "Article" }, ja: { title: "原名" } }, attributes: { year: 2025 } };
+  assert.deepEqual(diffDocument(base, { ...base, translations: { "en-US": { title: "Correct" } } }, "entity"), [{ path: "/translations/en-US/title", value: "Correct" }]);
+  assert.deepEqual(diffDocument(base, { ...base, attributes: {} }, "entity", ["/attributes/year"]), [{ path: "/attributes/year", remove: true }]);
+});
+
+test("three-way merge ignores reverted local edits, merges independent paths, exposes actual conflicts", () => {
+  assert.deepEqual(rebasePatch({ title: "A" }, { title: "B" }, [{ path: "/title", value: "A" }]), { working: { title: "B" }, conflicts: [] });
+  assert.deepEqual(rebasePatch({ title: "A", body: "a" }, { title: "B", body: "a" }, [{ path: "/body", value: "b" }]), { working: { title: "B", body: "b" }, conflicts: [] });
+  assert.deepEqual(rebasePatch({ title: "A" }, { title: "B" }, [{ path: "/title", value: "C" }]).conflicts, ["/title"]);
 });

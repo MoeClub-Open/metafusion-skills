@@ -22,8 +22,8 @@ Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文�
 
 - ContentUnit/Expression 必须有 work_id；ContentUnit.parent_id 同 Work。Expression 可有同 Work 的 content_unit_id，**没有 parent_id**。
 - Medium.release_id 必填，parent_id 同 Release；Track.medium_id 必填，parent_id 同 Medium。父级不得自环、跨域或成环。
-- 普通 PUT 不改 kind/work_id/release_id/medium_id；换归属须重建。
-- Track.contents 是结构性收录，不是 relation；expression_id 指表达，position 是该 Track 内顺序，locator 是实际载体的页码/时间码/路径等。sources 保存收录证据，旧值空缺不补造。
+- 普通编辑不改 kind/work_id/release_id/medium_id；换归属须重建。
+- Track.contents 是结构性收录，不是 relation；expression_id 指表达，position 是该 Track 内顺序，locator 是实际载体的页码/时间码/路径等。sources 可选保存已有收录资料，空缺不补造。
 - contents.position 在该 Track 内唯一；兄弟 Track.position 服务端不保证唯一，曲序需另核。
 - Release.subjects 声明全部收录 Expression 所属 Work；遗漏会 `undeclared_release_subject`。role 取当前启用 release_role，(work_id,role) 不重复。
 - `track_work` 是 release_role 词项，不是 relation；仅启用时表示发行中作为曲目收录的 Work（可含已证实影音作品）。词项结构 names/enabled，不虚构 description/source/metadata；role 不能替代 Expression 收录。
@@ -33,9 +33,9 @@ Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文�
 
 ## 条目正文
 
-目标实例的 OpenAPI 声明 `Translation.body` 时，`translations.<locale>.summary` 保存简短纯文本简介，`body` 保存可选 Markdown 条目说明（每语种最多 100000 个 Unicode 字符）。正文由目录服务共同维护，沿用实体权限、状态、来源和修订；它不等于被编目 Expression 的原文，也不替代日期、署名、收录及关系等结构化事实。社区承载讨论与署名考据。
+目标实例的 OpenAPI 声明 `Translation.body` 时，`translations.<locale>.summary` 保存简短纯文本简介，`body` 保存可选 Markdown 条目说明（每语种最多 100000 个 Unicode 字符）。正文由目录服务共同维护，沿用实体权限、副本提交与修订；它不等于被编目 Expression 的原文，也不替代日期、署名、收录及关系等结构化事实。社区承载讨论与署名考据。
 
-只改正文时使用 `/translations/<locale>/body` patch 和对应 `source_refs.pointers`，保留其它语言与字段，不提交身份复核数组。脚注用于展示引用，提交仍需有效外部来源；同一正文的并发冲突需人工合并。实例尚未声明该字段时不能尝试写入或借 `attributes` 绕过。
+正文使用副本中的 `/translations/<locale>/body` patch，保留其他语言和字段；来源和查证记录可选。同一正文的并发冲突需要阅读双方内容后合并。
 
 ## 表达与版本
 

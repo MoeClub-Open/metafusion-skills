@@ -1,14 +1,10 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import type { CommitReceipt } from "../metafusion-api.ts";
-import {
-  request,
-  configuredOrigin,
-  publicFailure,
-} from "../metafusion-api.ts";
+import { request, configuredOrigin, publicFailure } from "../metafusion-api.ts";
+import type { CatalogWorkspace, RequestFn, WorkspaceOperation } from "../metafusion-api.ts";
 
 const API = "/api/catalog";
 const fields = {
@@ -33,10 +29,6 @@ export function canonical(x) {
 }
 const same = (a, b) =>
   JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
-const digest = (x) =>
-  createHash("sha256")
-    .update(JSON.stringify(canonical(x)))
-    .digest("hex");
 const escape = (x) => x.replaceAll("~", "~0").replaceAll("/", "~1");
 const clone = (x) => JSON.parse(JSON.stringify(x));
 export function diffDocument(base, working, target, removals = []) {
@@ -80,109 +72,12 @@ export function diffDocument(base, working, target, removals = []) {
   if (result.length > 200) throw new Error("too_many_patch_paths");
   return result;
 }
-function omittedPaths(base, working, target, removals = []) {
-  const ignored = [];
-  function visit(a, b, p) {
-    for (const k of Object.keys(a)) {
-      const child = `${p}/${escape(k)}`;
-      if (!has(b, k)) {
-        if (!removals.some((r) => child === r || child.startsWith(r + "/")))
-          ignored.push(child);
-      } else if (record(a[k]) && record(b[k])) visit(a[k], b[k], child);
-    }
-  }
-  for (const k of fields[target]) {
-    if (!has(base, k)) continue;
-    const p = `/${escape(k)}`;
-    if (!has(working, k)) {
-      if (!removals.includes(p)) ignored.push(p);
-    } else if (record(base[k]) && record(working[k])) visit(base[k], working[k], p);
-  }
-  return ignored;
-}
 export function identityPatch(patch) {
   return patch.some(({ path: p }: Record<string, any>) => {
     const keys = parts(p);
     return keys[0] === "title" || keys[0] === "external_links" ||
       (keys[0] === "translations" && (keys.length <= 2 || keys[2] === "title"));
   });
-}
-function validateReview(ids, allowLocal = false) {
-  if (!Array.isArray(ids) || ids.length > 1000 || new Set(ids).size !== ids.length ||
-      ids.some((id) => typeof id !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) &&
-        !(allowLocal && /^@local:[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id))))
-    throw new Error("invalid_identity_review");
-  return ids;
-}
-
-/** Commit evidence pool: every source needs a unique key; every operation must cite
- *  sources via source_refs. Auto-fills missing keys (s1, s2, …) and, when an
- *  operation omits source_refs, cites every pool source for the whole operation.
- *  Old format without keys/source_refs is rejected by the server; this keeps the
- *  local tool producing valid payloads so Agents do not submit failing commits. */
-function normalizeCommitEvidence(evidence, operations) {
-  if (!Array.isArray(evidence) || !evidence.length) throw new Error("commit_evidence_required");
-  const reserved = new Set();
-  for (const raw of evidence) {
-    if (!record(raw)) throw new Error("invalid_source");
-    if (raw.key !== undefined && typeof raw.key !== "string") throw new Error("invalid_source_key");
-    const key = raw.key?.trim();
-    if (key) {
-      if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)) throw new Error("invalid_source_key");
-      if (reserved.has(key)) throw new Error("duplicate_source_key");
-      reserved.add(key);
-    }
-  }
-  const used = new Set();
-  let counter = 0;
-  const sources = evidence.map((raw) => {
-    if (!record(raw)) throw new Error("invalid_source");
-    let key = typeof raw.key === "string" ? raw.key.trim() : "";
-    if (!key) {
-      do { counter += 1; key = `s${counter}`; } while (reserved.has(key) || used.has(key));
-    }
-    if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)) throw new Error("invalid_source_key");
-    if (used.has(key)) throw new Error("duplicate_source_key");
-    used.add(key);
-    const { pointers, scope, ...rest } = raw;
-    if (pointers !== undefined && pointers !== null && !(Array.isArray(pointers) && pointers.length === 0))
-      throw new Error("source_pointers_not_allowed");
-    if (scope) throw new Error("source_scope_not_allowed");
-    return { ...rest, key };
-  });
-  const defaultRefs = sources.map((s) => ({ source: s.key }));
-  const ops = operations.map((op) => {
-    if (!record(op)) throw new Error("invalid_commit_operation");
-    if (Array.isArray(op.source_refs) && op.source_refs.length)
-      return op;
-    return { ...op, source_refs: defaultRefs.map((r) => ({ ...r })) };
-  });
-  return { sources, operations: ops };
-}
-
-function evidenceEligible(evidence, origin, blockedHosts = []) {
-  const blocked = new Set(["findverse.cc"]);
-  for (const value of [origin, process.env.MF_API_ORIGIN, process.env.MF_BASE, ...blockedHosts]) {
-    if (!value) continue;
-    try { blocked.add(new URL(value.includes("://") ? value : `https://${value}`).hostname.toLowerCase().replace(/\.$/, "")); }
-    catch { throw new Error("invalid_blocked_host"); }
-  }
-  for (const source of evidence) {
-    if (source?.kind === "self") throw new Error("source_not_eligible");
-    if (!record(source) || !["url", "publication"].includes(source.kind) ||
-        typeof source.citation !== "string" || !source.citation.trim())
-      throw new Error("invalid_source");
-    if (source.kind === "url" || (source.url !== undefined && source.url !== "")) {
-      let url;
-      try { url = new URL(source.url); } catch { throw new Error("invalid_source"); }
-      if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password)
-        throw new Error("invalid_source");
-      const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-      if ([...blocked].some((host) => hostname === host || hostname.endsWith(`.${host}`)))
-        throw new Error("source_not_eligible");
-    }
-  }
 }
 function parts(pointer) {
   return pointer
@@ -227,6 +122,7 @@ export function rebasePatch(base, current, patch, resolutions = {}) {
     const b = getAt(base, p.path),
       c = getAt(current, p.path),
       want = p.remove ? { exists: false } : { exists: true, value: p.value };
+    if (same(b, want)) continue;
     if (same(c, want)) continue;
     if (!same(b, c)) {
       const choice = resolutions[p.path];
@@ -240,720 +136,225 @@ export function rebasePatch(base, current, patch, resolutions = {}) {
   }
   return { working, conflicts };
 }
-function read(file) {
-  return JSON.parse(fs.readFileSync(file, "utf8"));
-}
-function save(file, value, exclusive = false) {
-  const text = JSON.stringify(value, null, 2) + "\n";
-  if (exclusive) {
-    const fd = fs.openSync(file, "wx", 0o600);
-    try {
-      fs.writeFileSync(fd, text, "utf8");
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    return;
-  }
-  const temp = `${file}.${randomUUID()}.tmp`,
-    fd = fs.openSync(temp, "wx", 0o600);
-  try {
-    fs.writeFileSync(fd, text, "utf8");
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  try {
-    // Windows scanners may briefly hold the destination. Keep the replacement
-    // atomic even when retrying; copying over state/receipts can truncate them.
-    for (let attempt = 0; ; attempt++) {
-      try {
-        fs.renameSync(temp, file);
-        return;
-      } catch (err) {
-        if (!["EPERM", "EBUSY"].includes(err.code) || attempt >= 5) throw err;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
-      }
-    }
-  } finally {
-    if (fs.existsSync(temp)) fs.unlinkSync(temp);
-  }
-}
-function safeFile(root, rel) {
-  const full = path.resolve(root, rel);
-  if (!full.startsWith(root + path.sep))
-    throw new Error("workspace_path_escape");
-  let current = root;
-  for (const p of path.relative(root, full).split(path.sep)) {
-    current = path.join(current, p);
-    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink())
-      throw new Error("workspace_symlink");
-  }
-  return full;
-}
-function requireResponse(r) {
-  if (r.status < 200 || r.status >= 300)
-    throw new Error(`HTTP_${r.status}:${r.body?.error ?? "unknown"}`);
-  return r.body;
-}
-function validateCheckout(body, entityIDs = [], relationIDs = []) {
-  if (
-    !record(body) ||
-    typeof body.actor_id !== "string" ||
-    !body.actor_id ||
-    typeof body.definitions_etag !== "string" ||
-    !Array.isArray(body.entities) ||
-    !Array.isArray(body.relations)
-  )
-    throw new Error("invalid_checkout_response");
-  for (const [target, ids] of [
-    ["entity", entityIDs],
-    ["relation", relationIDs],
-  ]) {
-    const items = body[target === "entity" ? "entities" : "relations"];
-    if (
-      items.length !== ids.length ||
-      new Set(items.map((x) => x.id)).size !== ids.length ||
-      items.some(
-        (x) =>
-          !ids.includes(x.id) ||
-          !Number.isSafeInteger(x.version) ||
-          x.version < 1,
-      )
-    )
-      throw new Error("incomplete_checkout");
-  }
-  return body;
-}
-function validReceipt(receipt: unknown, commit, applied = true): receipt is CommitReceipt {
-  if (
-    !record(receipt) ||
-    !["pending_review", "reviewed"].includes(receipt.review_status) ||
-    !["pending", "approved", "rejected", "exempt"].includes(receipt.review_decision) ||
-    (applied && (receipt.review_status !== "reviewed" || !["approved", "exempt"].includes(receipt.review_decision))) ||
-    receipt.id !== commit.id ||
-    receipt.applied !== applied ||
-    !record(receipt.refs) ||
-    !Array.isArray(receipt.items) ||
-    receipt.items.length !== commit.operations.length
-  )
-    return false;
-  return commit.operations.every((op, i) => {
-    const x = receipt.items[i];
-    return (
-      x.target === op.target &&
-      x.id === (op.action === "create" ? receipt.refs[op.ref] : op.id) &&
-      typeof x.id === "string" &&
-      /^[0-9a-f-]{36}$/.test(x.id) &&
-      Number.isSafeInteger(x.version) &&
-      x.version > 0 &&
-      typeof x.changed === "boolean" &&
-      typeof x.merged === "boolean"
-    );
-  });
-}
 
-// One workspace per editor. A local exclusive lock prevents two processes from
-// publishing or changing its receipt at once; server concurrency stays independent.
-export async function runWorkspace(
-  command,
-  {
-    dir,
-    origin,
-    entityIDs = [],
-    relationIDs = [],
-    target = "entity",
-    ref,
-    file,
-    language,
-    translationTitle,
-    review,
-    note,
-    sources,
-    commitID,
-    resolutions = {},
-    reviews = {},
-    removals = [],
-    blockedHosts = [],
-    apply = false,
-    requestFn = request,
-  }: Record<string, any> = {},
-) {
-  if (!dir || !origin) throw new Error("workspace_and_origin_required");
-  const root = path.resolve(dir),
-    stateFile = safeFile(root, ".mf/state.json");
-  if (command === "init") {
-    if (fs.existsSync(root)) throw new Error("workspace_directory_exists");
-    const checkout = validateCheckout(
-      requireResponse(
-        await requestFn(`${API}/checkout`, {
-          method: "POST",
-          body: { entity_ids: [], relation_ids: [] },
-        }),
-      ),
-    );
-    fs.mkdirSync(path.dirname(root), { recursive: true });
-    fs.mkdirSync(root);
-    fs.mkdirSync(path.join(root, ".mf"));
-    for (const d of [
-      "entities",
-      "relations",
-      ".mf/commits",
-      ".mf/receipts",
-      ".mf/refresh",
-    ])
-      fs.mkdirSync(path.join(root, d));
-    save(
-      stateFile,
-      {
-        format: 1,
-        origin,
-        actor_id: checkout.actor_id,
-        definitions_etag: checkout.definitions_etag,
-        entries: [],
-        pending: null,
-      },
-      true,
-    );
-    return { ok: true, dir: root, definitions_etag: checkout.definitions_etag };
+interface WorkspaceState {
+  origin: string;
+  workspace: CatalogWorkspace;
+  pending?: { kind: string; pathname: string; body: Record<string, any>; method: string };
+}
+interface WorkspaceOptions {
+  dir?: string;
+  origin?: string;
+  requestFn?: RequestFn;
+  workspaceID?: string;
+  entityIDs?: string[];
+  relationIDs?: string[];
+  name?: string;
+  message?: string;
+  title?: string;
+  commitID?: string;
+  pullRequestID?: string;
+  file?: string;
+  operations?: WorkspaceOperation[];
+  resolutions?: Record<string, any>[];
+  userIDs?: string[];
+  edit?: Record<string, any>;
+  limit?: number;
+  offset?: number;
+  status?: string;
+}
+const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"));
+function save(file: string, value: unknown) {
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+  try { fs.renameSync(temporary, file); }
+  catch (error) { fs.unlinkSync(temporary); throw error; }
+}
+function isWorkspace(value: unknown): value is CatalogWorkspace {
+  return record(value) && typeof value.id === "string" && Number.isSafeInteger(value.version)
+    && value.version > 0 && Array.isArray(value.objects)
+    && (value.head_commit_id === null || typeof value.head_commit_id === "string");
+}
+function input(options: WorkspaceOptions) {
+  return options.file ? read(options.file) : undefined;
+}
+const encoded = (id: string) => encodeURIComponent(id);
+
+/** The local file holds only the last observed server version, never a second
+ *  branch implementation. All staged objects and immutable commits live on the
+ *  server; the version/head below are compare-and-swap expectations. */
+export async function runWorkspace(command: string, options: WorkspaceOptions = {}) {
+  const { requestFn = request, entityIDs = [], relationIDs = [] } = options;
+  const origin = new URL(options.origin ?? configuredOrigin()).origin;
+  const send = async (pathname: string, method = "GET", body?: unknown) => {
+    try { return await requestFn(pathname, { method, ...(body === undefined ? {} : { body }) }); }
+    catch { return { status: 0, body: {} }; }
+  };
+  if (command === "list" || command === "pr-list") {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) {
+      if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100) throw new Error("invalid_limit");
+      query.set("limit", String(options.limit));
+    }
+    if (options.offset !== undefined) {
+      if (!Number.isInteger(options.offset) || options.offset < 0) throw new Error("invalid_offset");
+      query.set("offset", String(options.offset));
+    }
+    if (command === "pr-list") {
+      if (options.workspaceID) query.set("workspace_id", options.workspaceID);
+      if (options.status) query.set("status", options.status);
+    }
+    const response = await send(`${API}/${command === "list" ? "workspaces" : "pull-requests"}${query.size ? `?${query}` : ""}`);
+    return { ok: response.status === 200, status: response.status, result: response.status === 200 ? response.body : publicFailure(response) };
   }
-  if (!fs.existsSync(stateFile)) throw new Error("workspace_not_initialized");
-  const lockFile = safeFile(root, ".mf/lock");
+  if (!options.dir) throw new Error("workspace_directory_required");
+  const directory = path.resolve(options.dir);
+  fs.mkdirSync(directory, { recursive: true });
+  const stateFile = path.join(directory, ".mf-workspace.json");
+  const lockFile = path.join(directory, ".mf-workspace.lock");
   const lock = fs.openSync(lockFile, "wx", 0o600);
-  fs.writeFileSync(
-    lock,
-    JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }),
-  );
+  fs.writeFileSync(lock, String(process.pid));
   try {
-    const state = read(stateFile);
-    if (state.format !== 1 || state.origin !== origin)
-      throw new Error("workspace_origin_mismatch");
-    const fileFor = (e) => safeFile(root, e.file);
-    const removalsFor = (e) => removals
-      .filter((p) => p.startsWith(`${e.target}:${e.id ?? e.ref}:`))
-      .map((p) => p.slice(`${e.target}:${e.id ?? e.ref}:`.length));
-    const status = () =>
-      state.entries
-        .map((e) => {
-          const working = read(fileFor(e));
-          return {
-            target: e.target, id: e.id ?? null, ref: e.ref ?? null, file: e.file,
-            patch: e.base ? diffDocument(e.base, working, e.target, removalsFor(e)) : null,
-            ignored_omissions: e.base ? omittedPaths(e.base, working, e.target, removalsFor(e)) : [],
-          };
-        })
-        .filter((e) => e.patch === null || e.patch.length || e.ignored_omissions.length);
-    if (command === "status")
-      return { ok: true, pending: state.pending, changes: status() };
-    if (command === "article") {
-      if (state.pending) throw new Error("pending_commit");
-      if (!file || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(language || ""))
-        throw new Error("article_file_and_language_required");
-      if (entityIDs.length + (ref ? 1 : 0) !== 1) throw new Error("one_entity_or_ref_required");
-      const entry = state.entries.find((item) => item.target === "entity" && (ref ? item.ref === ref : item.id === entityIDs[0]));
-      if (!entry) throw new Error("entity_not_checked_out");
-      if (fs.statSync(file).size > 400000) throw new Error("article_too_long");
-      const body = new TextDecoder("utf-8", { fatal: true }).decode(fs.readFileSync(file));
-      if (body.includes("\0")) throw new Error("invalid_article_body");
-      if (Array.from(body).length > 100000) throw new Error("article_too_long");
-      const document = read(fileFor(entry));
-      const translations = document.translations || {};
-      const previous = translations[language] || {};
-      const title = translationTitle ?? previous.title;
-      if (typeof title !== "string" || !title.trim()) throw new Error("translation_title_required");
-      document.translations = { ...translations, [language]: { ...previous, title, body } };
-      save(fileFor(entry), document);
-      return { ok: true, language, file: entry.file, code_points: Array.from(body).length, applied: false };
+    if (command === "init") {
+      if (fs.existsSync(stateFile)) throw new Error("workspace_already_initialized");
+      const response = options.workspaceID
+        ? await send(`${API}/workspaces/${encoded(options.workspaceID)}`)
+        : await send(`${API}/workspaces`, "POST", { name: options.name ?? "", entity_ids: entityIDs, relation_ids: relationIDs });
+      if (![200, 201].includes(response.status) || !isWorkspace(response.body)) {
+        return { ok: false, status: response.status, result: publicFailure(response),
+          ...(response.status === 0 || response.status >= 500 ? { reason: "create_result_unknown_list_workspaces_before_retry" } : {}) };
+      }
+      save(stateFile, { origin, workspace: response.body });
+      return { ok: true, workspace: response.body };
     }
-    if (command === "checkout") {
-      if (state.pending)
-        throw new Error("pending_commit_requires_receipt_or_rebase");
-      if (status().length) throw new Error("working_tree_dirty");
-      const allEntities = [
-        ...new Set([
-          ...state.entries
-            .filter((e) => e.target === "entity")
-            .map((e) => e.id),
-          ...entityIDs,
-        ]),
-      ];
-      const allRelations = [
-        ...new Set([
-          ...state.entries
-            .filter((e) => e.target === "relation")
-            .map((e) => e.id),
-          ...relationIDs,
-        ]),
-      ];
-      if (allEntities.length + allRelations.length > 100)
-        throw new Error("workspace_entity_limit");
-      const co = validateCheckout(
-        requireResponse(
-          await requestFn(`${API}/checkout`, {
-            method: "POST",
-            body: { entity_ids: allEntities, relation_ids: allRelations },
-          }),
-        ),
-        allEntities,
-        allRelations,
-      );
-      if (co.actor_id !== state.actor_id)
-        throw new Error("workspace_actor_mismatch");
-      state.entries = [];
-      state.definitions_etag = co.definitions_etag;
-      for (const [target, items] of [
-        ["entity", co.entities],
-        ["relation", co.relations],
-      ])
-        for (const doc of items) {
-          const rel = `${target === "entity" ? "entities" : "relations"}/${doc.id}.json`;
-          save(safeFile(root, rel), doc);
-          state.entries.push({ target, id: doc.id, file: rel, base: doc });
-        }
+    const state = read(stateFile) as WorkspaceState;
+    if (state.origin !== origin) throw new Error("workspace_origin_mismatch");
+    if (!isWorkspace(state.workspace)) throw new Error("invalid_workspace_state");
+    const workspacePath = `${API}/workspaces/${encoded(state.workspace.id)}`;
+    const responseResult = (response) => ({ ok: response.status >= 200 && response.status < 300,
+      status: response.status, result: response.status >= 200 && response.status < 300 ? response.body : publicFailure(response) });
+    const refresh = async () => {
+      const current = await send(workspacePath);
+      if (current.status !== 200 || !isWorkspace(current.body)) return false;
+      state.workspace = current.body;
       save(stateFile, state);
-      return { ok: true, checked_out: state.entries.length };
-    }
-    if (command === "create") {
-      if (state.pending) throw new Error("pending_commit");
-      if (
-        !fields[target] ||
-        !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(ref ?? "") ||
-        !file
-      )
-        throw new Error("invalid_create_arguments");
-      if (
-        state.entries.length >= 100 ||
-        state.entries.some((e) => e.ref === ref)
-      )
-        throw new Error("duplicate_or_excessive_ref");
-      const doc = read(file);
-      if (
-        !record(doc) ||
-        doc.id ||
-        doc.version ||
-        doc.created_by ||
-        doc.redirect_id ||
-        doc.updated_at ||
-        doc.via
-      )
-        throw new Error("server_fields_forbidden");
-      if (
-        target === "entity" &&
-        (!record(review) ||
-          !Array.isArray(review.reviewed_candidate_ids) ||
-          review.reviewed_candidate_ids.some((x) => typeof x !== "string"))
-      )
-        throw new Error("identity_review_required");
-      if (target === "entity") validateReview(review.reviewed_candidate_ids, true);
-      const rel = `${target === "entity" ? "entities" : "relations"}/new-${ref}.json`;
-      save(safeFile(root, rel), doc, true);
-      state.entries.push({
-        target,
-        ref,
-        file: rel,
-        ...(target === "entity" ? { review } : {}),
-      });
-      save(stateFile, state);
-      return { ok: true, file: rel };
-    }
-    const loadCommit = (id) => {
-      if (!/^[0-9a-f-]{36}$/.test(id ?? ""))
-        throw new Error("commit_id_required");
-      const sealed = read(safeFile(root, `.mf/commits/${id}.json`));
-      if (
-        sealed.origin !== origin ||
-        sealed.hash !== digest(sealed.request) ||
-        sealed.request.id !== id
-      )
-        throw new Error("commit_integrity_failure");
-      return sealed;
+      return true;
     };
-    const seal = (operations, editNote, evidence, snapshots) => {
-      if (!operations.length || operations.length > 100)
-        throw new Error("empty_or_excessive_commit");
-      if (!editNote?.trim() || !Array.isArray(evidence) || !evidence.length)
-        throw new Error("commit_evidence_required");
-      evidenceEligible(evidence, origin, blockedHosts);
-      const normalized = normalizeCommitEvidence(evidence, operations);
-      const request = {
-        id: randomUUID(),
-        definitions_etag: state.definitions_etag,
-        edit_note: editNote,
-        sources: normalized.sources,
-        operations: normalized.operations,
-      };
-      save(
-        safeFile(root, `.mf/commits/${request.id}.json`),
-        { origin, hash: digest(request), request, snapshots },
-        true,
-      );
-      state.pending = { id: request.id, outcome: "local" };
-      save(stateFile, state);
-      return { ok: true, commit_id: request.id, operations: operations.length };
-    };
-    if (command === "commit") {
-      if (state.pending) throw new Error("pending_commit");
-      const operations = [],
-        snapshots: Record<string, any> = {}, ignored_omissions = [];
-      if (!Array.isArray(removals) || removals.some((p) => typeof p !== "string" ||
-          !state.entries.some((e) => e.id && p.startsWith(`${e.target}:${e.id}:/`))))
-        throw new Error("invalid_explicit_removal_target");
-      for (const e of state.entries) {
-        const doc = read(fileFor(e));
-        snapshots[e.file] = doc;
-        if (!e.id)
-          operations.push({
-            target: e.target,
-            action: "create",
-            ref: e.ref,
-            document: doc,
-            ...(e.target === "entity"
-              ? { reviewed_candidate_ids: e.review.reviewed_candidate_ids }
-              : {}),
-          });
-        else {
-          const explicit = removalsFor(e),
-            patch = diffDocument(e.base, doc, e.target, explicit),
-            ignored = omittedPaths(e.base, doc, e.target, explicit);
-          if (ignored.length) ignored_omissions.push({ target: e.target, id: e.id, paths: ignored });
-          const reviewed = reviews[`${e.target}:${e.id}`];
-          if (e.target === "entity" && identityPatch(patch)) {
-            if (reviewed === undefined) throw new Error("identity_review_required");
-            validateReview(reviewed);
-          } else if (reviewed !== undefined) throw new Error("invalid_identity_review");
-          if (patch.length)
-            operations.push({
-              target: e.target,
-              action: "update",
-              id: e.id,
-              base_version: e.base.version,
-              patch,
-              ...(reviewed !== undefined ? { reviewed_candidate_ids: reviewed } : {}),
-            });
+    if (command === "get" || command === "status") {
+      if (!await refresh()) return { ok: false, reason: "workspace_read_failed" };
+      return { ok: true, workspace: state.workspace, ...(state.pending ? { unknown_request: state.pending } : {}) };
+    }
+    if (command === "commits") return responseResult(await send(`${workspacePath}/commits`));
+    if (command === "receipt") {
+      const id = options.commitID ?? state.pending?.body.id ?? state.workspace.head_commit_id;
+      if (!id) throw new Error("commit_id_required");
+      const response = await send(`${API}/commits/${encoded(id)}`);
+      if (response.status === 200 && response.body?.id === id) {
+        const pending = state.pending;
+        if (pending && ["commit", "rebase"].includes(pending.kind) && pending.body.id === id) {
+          delete state.pending;
+          save(stateFile, state);
         }
+        const refreshed = await refresh();
+        return { ok: true, commit: response.body, workspace_refreshed: refreshed, workspace: state.workspace,
+          ...(state.pending ? { unknown_request: state.pending } : {}) };
       }
-      if (!operations.length && ignored_omissions.length)
-        return { ok: false, applied: false, reason: "omitted_keys_preserved_use_explicit_remove", ignored_omissions };
-      return { ...seal(operations, note, sources, snapshots), ignored_omissions };
+      return { ...responseResult(response), reason: "commit_result_not_confirmed_keep_id" };
     }
-    const id = commitID ?? state.pending?.id,
-      sealed = loadCommit(id),
-      commit = sealed.request;
-    if (!state.pending || state.pending.id !== id)
-      throw new Error("commit_not_pending");
-    async function finalize(receipt) {
-      if (receipt?.applied === false && ["pending_review","reviewed"].includes(receipt.review_status) &&
-          ["pending","rejected"].includes(receipt.review_decision) && validReceipt(receipt,commit,false)) {
-        save(safeFile(root, `.mf/receipts/${id}.json`), receipt);
-        state.pending.outcome = receipt.review_decision === "rejected" ? "rejected" : "pending_review";
-        save(stateFile,state);
-        return {ok:true,applied:false,queued:receipt.review_status==="pending_review",reason:receipt.review_decision==="rejected"?"review_rejected":"pending_review",receipt};
-      }
-      if (!validReceipt(receipt, commit)) {
-        state.pending.outcome = "unknown";
-        save(stateFile, state);
-        return {
-          ok: false,
-          applied: null,
-          reason: "invalid_receipt",
-          commit_id: id,
-        };
-      }
-      save(safeFile(root, `.mf/receipts/${id}.json`), receipt);
-      state.pending.outcome = "applied";
-      save(stateFile, state);
-      const journalFile = safeFile(root, `.mf/refresh/${id}.json`);
-      const journal = fs.existsSync(journalFile) ? read(journalFile) : {};
-      const entityIDs = state.entries
-        .filter((e) => e.target === "entity")
-        .map((e) => e.id ?? receipt.refs[e.ref]);
-      const relationIDs = state.entries
-        .filter((e) => e.target === "relation")
-        .map((e) => e.id ?? receipt.refs[e.ref]);
-      let co;
-      try {
-        co = validateCheckout(
-          requireResponse(
-            await requestFn(`${API}/checkout`, {
-              method: "POST",
-              body: { entity_ids: entityIDs, relation_ids: relationIDs },
-            }),
-          ),
-          entityIDs,
-          relationIDs,
-        );
-      } catch (error) {
-        state.pending.outcome = "applied";
-        save(stateFile, state);
-        return {
-          ok: false,
-          applied: true,
-          reason: "receipt_confirmed_checkout_pending",
-          detail: String(error),
-          receipt,
-        };
-      }
-      if (co.actor_id !== state.actor_id)
-        throw new Error("workspace_actor_mismatch");
-      for (const item of receipt.items) {
-        const doc = (
-          item.target === "entity" ? co.entities : co.relations
-        ).find((e) => e.id === item.id);
-        if (doc.version < item.version)
-          throw new Error("stale_checkout_after_push");
-      }
-      const refresh: Record<string, any> = {}, conflicts = [], ignored_omissions = [];
-      for (const e of state.entries) {
-        const entityID = e.id ?? receipt.refs[e.ref];
-        const doc = (e.target === "entity" ? co.entities : co.relations).find(
-          (x) => x.id === entityID,
-        );
-        const working = read(fileFor(e)),
-          prior = journal.format === 2 ? journal.files?.[e.file]?.base : journal[e.file],
-          // A previous refresh may have written only some files before failing.
-          // Their server fields identify the durable journal's newer baseline.
-          base = prior && working.id === prior.id && working.version === prior.version
-            ? prior : sealed.snapshots[e.file],
-          patch = diffDocument(base, working, e.target),
-          result = rebasePatch(base, doc, patch, resolutions[`${e.target}:${entityID}`] ?? {}),
-          ignored = omittedPaths(base, working, e.target);
-        if (ignored.length) ignored_omissions.push({ target: e.target, id: entityID, paths: ignored });
-        if (result.conflicts.length)
-          conflicts.push({ target: e.target, id: entityID, paths: result.conflicts });
-        refresh[e.file] = { base: doc, working: result.working };
-      }
-      if (conflicts.length)
-        return { ok: false, applied: true, reason: "receipt_refresh_conflict", conflicts, receipt, ignored_omissions };
-      // Persist both baselines and preserved local edits before touching files.
-      // Retrying receipt after any write failure never loses or repeats a push.
-      save(journalFile, { format: 2, files: refresh });
-      for (const e of state.entries) {
-        e.id = e.id ?? receipt.refs[e.ref];
-        e.base = refresh[e.file].base;
-        delete e.ref;
-        delete e.review;
-        save(fileFor(e), refresh[e.file].working);
-      }
-      state.definitions_etag = co.definitions_etag;
-      state.pending = null;
-      save(stateFile, state);
-      return { ok: true, applied: true, receipt, ignored_omissions };
+    if (command === "pr-get") {
+      if (!options.pullRequestID) throw new Error("pull_request_id_required");
+      return responseResult(await send(`${API}/pull-requests/${encoded(options.pullRequestID)}`));
     }
-    if (command === "rebase") {
-      if (!["conflict", "rejected"].includes(state.pending.outcome))
-        throw new Error("unknown_push_requires_receipt_same_id");
-      const receipt = await requestFn(`${API}/commits/${id}`);
-      if (receipt.status === 200 && receipt.body?.review_decision !== "rejected") return finalize(receipt.body);
-      if (receipt.status !== 404 && !(receipt.status===200 && receipt.body?.review_decision==="rejected")) throw new Error("receipt_unavailable");
-      evidenceEligible(commit.sources, origin, blockedHosts);
-      for (const e of state.entries)
-        if (!same(read(fileFor(e)), sealed.snapshots[e.file]))
-          throw new Error("working_tree_changed_after_commit");
-      const entityIDs = state.entries
-          .filter((e) => e.id && e.target === "entity")
-          .map((e) => e.id),
-        relationIDs = state.entries
-          .filter((e) => e.id && e.target === "relation")
-          .map((e) => e.id);
-      const co = validateCheckout(
-        requireResponse(
-          await requestFn(`${API}/checkout`, {
-            method: "POST",
-            body: { entity_ids: entityIDs, relation_ids: relationIDs },
-          }),
-        ),
-        entityIDs,
-        relationIDs,
-      );
-      if (co.actor_id !== state.actor_id)
-        throw new Error("workspace_actor_mismatch");
-      const rebased = [],
-        conflicts = [],
-        snapshots: Record<string, any> = {},
-        pendingWrites = [];
-      for (const op of commit.operations) {
-        if (op.action === "create") {
-          const refreshed = reviews[op.ref];
-          if (refreshed !== undefined) validateReview(refreshed, true);
-          rebased.push({
-            ...op,
-            ...(refreshed !== undefined
-              ? { reviewed_candidate_ids: refreshed }
-              : {}),
-          });
-          continue;
-        }
-        const entry = state.entries.find(
-            (e) => e.target === op.target && e.id === op.id,
-          ),
-          current = (op.target === "entity" ? co.entities : co.relations).find(
-            (e) => e.id === op.id,
-          );
-        const result = rebasePatch(
-          entry.base,
-          current,
-          op.patch,
-          resolutions[`${op.target}:${op.id}`] ?? {},
-        );
-        if (result.conflicts.length)
-          conflicts.push({
-            target: op.target,
-            id: op.id,
-            paths: result.conflicts,
-          });
-        const patch = diffDocument(current, result.working, op.target,
-          op.patch.filter((p) => p.remove && getAt(current, p.path).exists && !getAt(result.working, p.path).exists).map((p) => p.path));
-        const refreshed = reviews[`${op.target}:${op.id}`];
-        if (refreshed !== undefined) validateReview(refreshed);
-        if (patch.length) {
-          const updated = { ...op, base_version: current.version, patch };
-          if (op.target === "entity" && identityPatch(patch)) {
-            if (refreshed !== undefined) updated.reviewed_candidate_ids = refreshed;
-            if (updated.reviewed_candidate_ids === undefined) throw new Error("identity_review_required");
-          } else {
-            if (refreshed !== undefined) throw new Error("invalid_identity_review");
-            delete updated.reviewed_candidate_ids;
-          }
-          rebased.push(updated);
-        }
-        pendingWrites.push({ entry, current, working: result.working });
+    if (state.pending && command !== "retry") throw new Error("request_result_unknown_read_receipt_or_retry_same_request");
+    let pathname = workspacePath, method = "POST", body: Record<string, any>;
+    const expected = { expected_version: state.workspace.version };
+    const head = { ...expected, expected_head: state.workspace.head_commit_id ?? "" };
+    switch (command) {
+      case "checkout":
+        pathname += "/checkout";
+        body = { ...expected, entity_ids: entityIDs, relation_ids: relationIDs };
+        break;
+      case "stage": {
+        const operations = options.operations ?? input(options);
+        if (!Array.isArray(operations) || !operations.length) throw new Error("operations_array_required");
+        pathname += "/changes";
+        method = "PUT";
+        body = { ...expected, operations };
+        break;
       }
-      if (conflicts.length)
-        return {
-          ok: false,
-          applied: false,
-          reason: "rebase_conflict",
-          conflicts,
-        };
-      for (const entry of state.entries.filter((e) => e.id)) {
-        const edit = pendingWrites.find((x) => x.entry === entry),
-          current = (
-            entry.target === "entity" ? co.entities : co.relations
-          ).find((x) => x.id === entry.id);
-        entry.base = current;
-        save(fileFor(entry), edit ? edit.working : current);
+      case "members": {
+        const users = options.userIDs ?? input(options);
+        if (!Array.isArray(users) || users.some((id) => typeof id !== "string")) throw new Error("user_ids_array_required");
+        pathname += "/members";
+        method = "PUT";
+        body = { ...expected, user_ids: users };
+        break;
       }
-      for (const entry of state.entries.filter((e) => !e.id)) {
-        const op = rebased.find((x) => x.action === "create" && x.ref === entry.ref);
-        if (entry.target === "entity") entry.review = { reviewed_candidate_ids: op.reviewed_candidate_ids };
+      case "edit":
+        method = "PATCH";
+        body = { ...(options.edit ?? input(options)), ...expected };
+        break;
+      case "commit":
+        if (!options.message?.trim()) throw new Error("commit_message_required");
+        pathname += "/commits";
+        body = { ...expected, id: options.commitID ?? randomUUID(), message: options.message };
+        break;
+      case "push":
+        pathname += "/push";
+        body = { ...head, ...(options.title ? { title: options.title } : {}) };
+        break;
+      case "rebase":
+        pathname += "/rebase";
+        body = { ...head, id: options.commitID ?? randomUUID(), ...(options.message ? { message: options.message } : {}),
+          resolutions: options.resolutions ?? input(options) ?? [] };
+        break;
+      case "pr-create":
+        pathname = `${API}/pull-requests`;
+        body = { ...head, workspace_id: state.workspace.id, title: options.title ?? state.workspace.name };
+        break;
+      case "pr-edit":
+      case "pr-merge": {
+        if (!options.pullRequestID) throw new Error("pull_request_id_required");
+        const prPath = `${API}/pull-requests/${encoded(options.pullRequestID)}`;
+        // The PR version/head are the snapshot being approved, independently of
+        // this local checkout. The server checks them again inside the merge.
+        const pr = await send(prPath);
+        if (pr.status !== 200 || !Number.isSafeInteger(pr.body?.version) || typeof pr.body?.source_head_id !== "string")
+          return responseResult(pr);
+        pathname = command === "pr-merge" ? `${prPath}/merge` : prPath;
+        method = command === "pr-merge" ? "POST" : "PATCH";
+        body = command === "pr-merge"
+          ? { expected_version: pr.body.version, expected_head: pr.body.source_head_id }
+          : { ...(options.edit ?? input(options)), expected_version: pr.body.version };
+        break;
       }
-      state.definitions_etag = co.definitions_etag;
-      state.pending = null;
-      for (const e of state.entries) snapshots[e.file] = read(fileFor(e));
-      if (!rebased.length) {
-        save(stateFile, state);
-        return { ok: true, applied: false, reason: "changes_already_present" };
-      }
-      return {
-        ...seal(rebased, commit.edit_note, commit.sources, snapshots),
-        supersedes: id,
-      };
+      case "retry":
+        if (!state.pending) throw new Error("no_unknown_request");
+        ({ pathname, method, body } = state.pending);
+        break;
+      default: throw new Error(`unknown_command:${command}`);
     }
-    if (!["preview", "push", "receipt"].includes(command))
-      throw new Error("unknown_workspace_command");
-    if (command === "preview") {
-      if (["unknown", "applied"].includes(state.pending.outcome))
-        throw new Error("unknown_push_requires_receipt_same_id");
-      const r = await requestFn(`${API}/commits/preview`, {
-        method: "POST",
-        body: commit,
-      });
-      if (r.status === 409) {
-        state.pending.outcome = "conflict";
-        save(stateFile, state);
-      }
-      return {
-        ok: r.status === 200 && validReceipt(r.body, commit, false),
-        applied: false,
-        commit_id: id,
-        status: r.status,
-        result: r.status === 200 ? r.body : publicFailure(r),
-      };
-    }
-    const prior = await requestFn(`${API}/commits/${id}`);
-    if (prior.status === 200) return finalize(prior.body);
-    if (prior.status !== 404)
-      return {
-        ok: false,
-        applied: null,
-        reason: "receipt_unavailable",
-        status: prior.status,
-        commit_id: id,
-      };
-    if (command === "receipt")
-      return {
-        ok: false,
-        applied: null,
-        reason: "receipt_not_found_may_be_in_flight",
-        commit_id: id,
-      };
-    if (!apply) throw new Error("push_requires_apply_and_task_authorization");
-    const identity = validateCheckout(
-      requireResponse(
-        await requestFn(`${API}/checkout`, {
-          method: "POST",
-          body: { entity_ids: [], relation_ids: [] },
-        }),
-      ),
-    );
-    if (identity.actor_id !== state.actor_id)
-      throw new Error("workspace_actor_mismatch");
-    for (const e of state.entries)
-      if (!same(read(fileFor(e)), sealed.snapshots[e.file]))
-        throw new Error("working_tree_changed_after_commit");
-    // Persist uncertainty before sending. A killed process cannot leave a local
-    // state which allows rebasing or giving the same work a new request ID.
-    const previouslyUnknown = ["unknown", "applied"].includes(
-      state.pending.outcome,
-    );
-    state.pending.outcome = "unknown";
+    state.pending = { kind: command === "retry" ? state.pending!.kind : command, pathname, method, body };
     save(stateFile, state);
-    const pushed = await requestFn(`${API}/commits`, {
-      method: "POST",
-      body: commit,
-      tries: 1,
-    });
-    if (pushed.status === 200 || pushed.status === 202) return finalize(pushed.body);
-    // This specific 503 certifies rollback of this request. It cannot resolve
-    // an earlier lost response: another same-ID request may still be in flight.
-    if (!previouslyUnknown && pushed.status === 503 &&
-        pushed.body?.error === "transaction_busy" && pushed.body?.applied === false) {
-      state.pending.outcome = "rejected";
-      save(stateFile, state);
-      return {
-        ok: false, applied: false, reason: "push_busy_keep_same_commit",
-        commit_id: id, status: pushed.status, result: publicFailure(pushed),
-      };
+    const response = await send(pathname, method, body);
+    if (response.status === 0 || response.status >= 500) {
+      return { ok: false, status: response.status, reason: "request_result_unknown_keep_same_request",
+        request: state.pending, result: publicFailure(response) };
     }
-    if (pushed.status === 0 || pushed.status >= 500) {
-      const recovered = await requestFn(`${API}/commits/${id}`);
-      if (recovered.status === 200) return finalize(recovered.body);
-      return {
-        ok: false,
-        applied: null,
-        reason: "push_unknown_keep_same_commit",
-        commit_id: id,
-        status: pushed.status,
-      };
-    }
-    if (previouslyUnknown)
-      return {
-        ok: false,
-        applied: null,
-        reason: "previous_push_still_unknown_keep_same_commit",
-        status: pushed.status,
-        commit_id: id,
-        result: publicFailure(pushed),
-      };
-    state.pending.outcome = pushed.status === 409 ? "conflict" : "rejected";
+    delete state.pending;
+    const workspace = isWorkspace(response.body) ? response.body
+      : isWorkspace(response.body?.workspace) ? response.body.workspace : undefined;
+    if (workspace) state.workspace = workspace;
     save(stateFile, state);
-    return {
-      ok: false,
-      applied: false,
-      status: pushed.status,
-      result: publicFailure(pushed),
-      commit_id: id,
-    };
+    // A reviewer receives only the frozen PR/commits. A null workspace is an
+    // intentional privacy boundary, not a reason to fetch the source worktree.
+    if (response.status >= 200 && response.status < 300 && response.body?.workspace === null)
+      return { ...responseResult(response), workspace: null };
+    if (!workspace && response.status >= 200 && response.status < 300) {
+      const refreshed = await refresh();
+      return { ...responseResult(response), workspace_refreshed: refreshed, workspace: state.workspace };
+    }
+    return { ...responseResult(response), workspace: state.workspace };
   } finally {
     fs.closeSync(lock);
     fs.unlinkSync(lockFile);
@@ -963,85 +364,31 @@ export async function runWorkspace(
 export async function runCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || command === "help") {
-    console.log(
-      "mf-workspace init|checkout|create|article|status|commit|preview|push|receipt|rebase --dir DIR\ncheckout: --entity UUID / --relation UUID (repeatable)\narticle: --entity UUID (or --ref NAME) --lang LOCALE --file article.md [--title TITLE] (local edit only)\ncreate: --target entity|relation --ref NAME --file document.json --review identity-review.json (entities)\ncommit: --note TEXT --sources sources.json [--reviews identity-reviews.json] [--remove entity:UUID:/path] (repeatable)\nMissing keys are preserved and reported as ignored_omissions; deletion requires --remove.\npush: --apply [--commit UUID]; preview/receipt: [--commit UUID]\nreceipt/rebase: [--resolutions resolutions.json]; rebase: [--reviews identity-reviews.json]\n--blocked-host HOST (repeatable): additional local evidence host blacklist",
-    );
+    console.log("mf-workspace init|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
+      + "--dir DIR holds the last observed server workspace, version and head; never credentials.\n"
+      + "init: [--name NAME] [--entity UUID] [--relation UUID], or --workspace UUID to attach.\n"
+      + "checkout: --entity UUID / --relation UUID (repeatable). stage: --file operations.json.\n"
+      + "commit: --message TEXT [--commit UUID]. push: [--title TEXT].\n"
+      + "rebase: [--file resolutions.json] [--message TEXT] [--commit UUID]. receipt: [--commit UUID].\n"
+      + "members: --file userids.json. edit: --file patch.json. pr-get/pr-edit/pr-merge: --pr UUID.\n"
+      + "pr-create: [--title TEXT]. pr-edit: --file patch.json. Unknown outcomes retain the exact request; inspect receipt/status before retry.");
     return;
   }
-  const options: Record<string, any> = { entityIDs: [], relationIDs: [], removals: [], blockedHosts: [] };
+  const options: WorkspaceOptions = { entityIDs: [], relationIDs: [] };
+  const fields: Record<string, keyof WorkspaceOptions> = { "--dir": "dir", "--workspace": "workspaceID", "--name": "name",
+    "--message": "message", "--title": "title", "--commit": "commitID", "--pr": "pullRequestID", "--file": "file", "--status": "status" };
   for (let i = 0; i < args.length; i++) {
-    const flag = args[i];
-    if (flag === "--apply") {
-      options.apply = true;
-      continue;
-    }
-    const value = args[++i];
-    if (!value || value.startsWith("--")) throw new Error("missing_argument");
-    switch (flag) {
-      case "--dir":
-        options.dir = value;
-        break;
-      case "--entity":
-        options.entityIDs.push(value);
-        break;
-      case "--relation":
-        options.relationIDs.push(value);
-        break;
-      case "--target":
-        options.target = value;
-        break;
-      case "--ref":
-        options.ref = value;
-        break;
-      case "--file":
-        options.file = value;
-        break;
-      case "--lang":
-        options.language = value;
-        break;
-      case "--title":
-        options.translationTitle = value;
-        break;
-      case "--note":
-        options.note = value;
-        break;
-      case "--sources":
-        options.sources = read(value);
-        break;
-      case "--review":
-        options.review = read(value);
-        break;
-      case "--reviews":
-        options.reviews = read(value);
-        break;
-      case "--remove":
-        options.removals.push(value);
-        break;
-      case "--blocked-host":
-        options.blockedHosts.push(value);
-        break;
-      case "--commit":
-        options.commitID = value;
-        break;
-      case "--resolutions":
-        options.resolutions = read(value);
-        break;
-      default:
-        throw new Error(`unknown_argument:${flag}`);
-    }
+    const flag = args[i], value = args[++i];
+    if (!value || value.startsWith("--")) throw new Error(`missing_argument:${flag}`);
+    if (flag === "--entity") options.entityIDs!.push(value);
+    else if (flag === "--relation") options.relationIDs!.push(value);
+    else if (flag === "--limit" || flag === "--offset") options[flag === "--limit" ? "limit" : "offset"] = Number(value);
+    else if (fields[flag]) (options as Record<string, unknown>)[fields[flag]] = value;
+    else throw new Error(`unknown_argument:${flag}`);
   }
-  const result = await runWorkspace(command, {
-    ...options,
-    origin: configuredOrigin(),
-  });
+  const result = await runWorkspace(command, options);
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) process.exitCode = 1;
 }
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
-)
-  runCli().catch((error) => {
-    console.error(JSON.stringify({ ok: false, error: String(error) }));
-    process.exitCode = 1;
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href)
+  runCli().catch((error) => { console.error(JSON.stringify({ ok: false, error: String(error) })); process.exitCode = 1; });

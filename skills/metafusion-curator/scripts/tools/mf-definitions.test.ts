@@ -211,11 +211,18 @@ function fixture({
   };
 }
 
-test("validates narrow plan shape, four required locales, and url/publication evidence only", () => {
+test("validates definition shape while optional source metadata never blocks an ordinary plan", () => {
   assert.equal(validatePlan(plan()), null);
   assert.equal(validatePlan(plan({ unexpected: true })), "invalid_plan");
   assert.equal(validatePlan(plan({ term: { names: LOCALES, description: "forbidden" } })), "invalid_term_patch");
-  assert.equal(validatePlan(plan({ sources: [{ kind: "self", citation: "internal" }] })), "invalid_source");
+  assert.equal(validatePlan(plan({ sources: [{ kind: "self", citation: "internal" }] })), null);
+  assert.equal(validatePlan(plan({ sources: [] })), null);
+  const withoutSources = plan();
+  delete withoutSources.sources;
+  assert.equal(validatePlan(withoutSources), null);
+  const fieldWithoutSources = fieldPlan();
+  delete fieldWithoutSources.sources;
+  assert.equal(validatePlan(fieldWithoutSources), null);
   assert.equal(validatePlan(plan({ sources: [{ kind: "url", citation: "citation", url: "javascript:alert(1)" }] })), "invalid_source");
   assert.equal(validatePlan(plan({ sources: [{ kind: "url", citation: "citation", url: "https://source.example/item", metadata: {} }] })), "invalid_source");
   assert.equal(validatePlan(plan({ term: { names: { "xx_!": "bad" } } })), "invalid_names");

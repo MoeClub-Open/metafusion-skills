@@ -1,382 +1,134 @@
-# MetaFusion API 载荷参考
+# API 载荷
 
-本页是服务端 API 载荷示例的唯一维护处。提交前先读目标实例的 `/api/openapi.json` 与 `/api/catalog/definitions`；认证、字段码与可用值以实例为准，全站只有 `/api` 这一套前缀。工具参数和 plan schema 以相应工具 `--help` 为准，不在此复制。
+统一前缀 `/api`。执行前读取目标实例 `/api/openapi.json` 与 `/api/catalog/definitions`；字段、词项和关系码由实例决定。请求使用 `Authorization: Bearer <令牌>` 和 `Content-Type: application/json`，凭据不放进 JSON 文件。
 
-## 请求头与证据
+普通编辑只有服务器工作副本这一条路径；来源依据、source_refs、身份查证数组都不是工作副本请求字段。已有真实资料不因协议迁移而清空。
 
-实体与关系写入位于 `/api/catalog/*`，需要登录；定义管理、外部来源查询与文件操作的路径见[接口范围](endpoint-scope.md)。凭据三选一（都放在同一个请求头里）：
+## 协作载荷
 
-    Authorization: Bearer <会话令牌 / OAuth 访问令牌 / PAT>
-    # PAT 是 `mfp_` 前缀的长期机器凭据：跑脚本或 Agent 时用它，不要共用某个人的会话令牌；
-    # 它的有效权限 = 账号现时权限 ∩ 创建时选的 scopes（权限码），不够就 403，无效/吊销/过期是 401 invalid_token
-    Content-Type: application/json
-    Idempotency-Key: <uuid>        # handler 允许省略；仅创建实体 / 创建关系（非据 OpenAPI 缺席推断）
-                                   # 持久 24h；键按操作 + 用户 + 请求键隔离，并保存载荷摘要。
-                                   # 同键同载荷重放首次结果；同键异载荷 → 409 idempotency_conflict。
+创建副本：
 
-每次写入都要准备：
-
-    "edit_note": "根据官方发行目录补充初版蓝光的品番与分集目录",
-    "sources": [
-      {"kind": "url", "citation": "发行方官方目录：支持 release.title、catalog_number、edition_date、subjects/contents", "url": "https://example.org/official-catalog"}
-    ]
-
-新来源使用 `url` / `publication`，`citation` 说明支持的事实；URL 为不含用户信息的公开 HTTP(S) 地址。历史 DTO 中的 `self` 不可用于新增来源，当前实例及其子域也不能作为独立证据（`source_not_eligible`）。缺 `edit_note` 或 `sources` 返回 `evidence_required`；这些是 API 输入要求，来源的实际支持范围见[来源说明](source-policy.md)。
-
-## 变更集信封
-
-Agent 普通编辑使用 checkout 与 CatalogCommit，完整协议只维护在[公开提交文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md)，本地流程见[提交与恢复](workflow.md)。操作携带 base_version、JSON Pointer patch；实体创建声明 reviewed_candidate_ids 与本批 ref。
-
-每条 `sources[]` 有唯一 `key`；每个操作用非空 `source_refs`（`[{source:<key>, pointers?:[json-pointer]}]`）引用来源。缺 key、缺引用或来源未被使用分别返回 `source_key_required`、`source_refs_required`、`source_unused`。本地工具默认自动补 key 并把来源池映射到每个操作；需要不同来源归属时，在提交 API 中显式填写各操作的 `source_refs`，无需因为来源不同而拆分提交。
-
-    {
-      "id": "<固定 UUID>",
-      "definitions_etag": "<checkout 返回值>",
-      "edit_note": "根据官方目录补充题名",
-      "sources": [
-        {"key": "catalog", "kind": "url", "citation": "官方目录支持题名", "url": "https://example.org/catalog"}
-      ],
-      "operations": [
-        {
-          "target": "entity",
-          "action": "update",
-          "id": "<实体 UUID>",
-          "base_version": 3,
-          "reviewed_candidate_ids": [],
-          "patch": [{"path": "/translations/zh-CN/title", "value": "中文题名"}],
-          "source_refs": [{"source": "catalog", "pointers": ["/translations/zh-CN/title"]}]
-        },
-        {
-          "target": "entity",
-          "action": "create",
-          "ref": "recording",
-          "reviewed_candidate_ids": [],
-          "document": {"kind": "expression", "title": "录音", "work_id": "<Work UUID>"},
-          "source_refs": [{"source": "catalog"}]
-        }
-      ]
-    }
-
-## 单对象交互式信封
-
-创建与更新共用同一信封：`POST /api/catalog/entities`（`expected_version` 必须为 0、`entity.id` 留空）与
-`PUT /api/catalog/entities/{id}`（`expected_version` 为回读到的 `version`）。
-
-    {
-      "entity": { "...": "见下各 kind" },
-      "expected_version": 0,
-      "edit_note": "…",
-      "sources": [{"kind": "url", "citation": "…", "url": "https://…"}]
-    }
-
-PUT 是**整实体替换**：带当前 `expected_version`，写后回读并逐字段核对。Track contents 可能因可见性被裁剪，不能把 GET 后整实体 PUT 说成能保全隐藏 contents；修改单条收录使用下文的专用 API。
-
-条目没有发布状态。普通编辑使用 commit，免审权限才可调用下文旧单对象 DTO 示例；生命周期端点只做删除或合并。待审回执不是失败。
-
-本地 `mf-workspace` 与 `mf-track-content` 的 plan 字段和参数以各自 `--help` 为准。本页只维护服务端 API 请求形状；工具默认预览，执行开关不提供任务授权。
-
-## 各 kind 允许的结构字段
-
-| kind | 允许的归属字段（出现在实体上的结构性引用） | 备注 |
-| --- | --- | --- |
-| `agent` | 无 | 责任主体事实依实际字段、关系与来源表达 |
-| `collection` | 无 | 聚合靠 `includes` 关系 |
-| `work` | 无 | 创作署名走关系，不写字段 |
-| `content_unit` | `work_id`、`parent_id` | `parent_id` 只能指向同一 Work 的目录项 |
-| `expression` | `work_id`、`content_unit_id` | `content_unit_id` 若存在必须同 Work；**没有 `parent_id`** |
-| `release` | 无（`subjects` 是唯一结构字段） | 不写 `work_id` |
-| `medium` | `release_id`、`parent_id` | `parent_id` 只能指向同一 Release 的 Medium |
-| `track` | `medium_id`、`parent_id`、`contents` | `parent_id` 只能指向同一 Medium；`contents` 是唯一收录来源 |
-
-放错 kind 引用字段返回 `invalid_structural_field`；缺归属返回 `parent_required`。
-
-## 动态属性字段
-
-当前 Entity 不包含 types；可写属性取当前 `document.fields` 中 `applicable_kinds` 包含本 kind 的字段。展示模板和自由标签不改变可写范围。字段白名单、词表与结构化字段只维护在 [字段适用层级与结构化字段](types-and-fields.md)，本页只给载荷示例。
-
-注意两点易错项：
-
-- 时长字段码是 **`duration`**（单位秒）；`duration_seconds` 会被严格解析拒收。
-- 枚举字段（`format`、`packaging`、`role`、`edition_type`、`edition_batch`、`distribution_channel`、`entry_role`）
-  的值是**词项代码**；不存在的码会被拒绝为 `invalid_term`。
-
-## agent
-
-    POST /api/catalog/entities
-    {
-      "entity": {
-        "kind": "agent",
-        "title": "新海诚",
-        "original_language": "ja",
-        "attributes": {},
-        "translations": {
-          "ja": {"title": "新海誠"},
-          "zh-CN": {"title": "新海诚", "aliases": ["Makoto Shinkai"]},
-          "en-US": {"title": "Makoto Shinkai"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "根据官方作品页建立创作者主体",
-      "sources": [{"kind": "url", "citation": "官方作品页", "url": "https://example.org/creator"}]
-    }
-
-## work
-
-    POST /api/catalog/entities
-    {
-      "entity": {
-        "kind": "work",
-        "title": "秒速5厘米",
-        "original_language": "ja",
-        "attributes": {"tags": ["动画", "剧场版"]},
-        "external_links": {},
-        "pictures": [
-          {
-            "url": "https://example.org/covers/5cm.jpg",
-            "caption": {"zh-CN": "官方海报", "en-US": "Official poster"},
-            "source": {"kind": "url", "citation": "官方站点海报", "url": "https://example.org/official"}
-          }
-        ],
-        "translations": {
-          "ja": {"title": "秒速5センチメートル"},
-          "zh-CN": {"title": "秒速5厘米", "summary": "作品级简介", "body": "## 创作背景\n根据外部资料撰写条目说明。[^official]\n\n[^official]: https://example.org/official", "aliases": ["5cm/s"]},
-          "en-US": {"title": "5 Centimeters per Second", "summary": "English summary"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "根据官方作品页建立创作母体",
-      "sources": [{"kind": "url", "citation": "官方作品页", "url": "https://example.org/official"}]
-    }
-
-- `title` 是基础题名，`original_language` 声明它属于哪个语种；原语言题名放在对应 locale 的 `translations` 行里。
-- `external_links` 的键必须来自实例预设；作品/发行/主体的官方站点用 `official_website` 记**完整 URL**
-  （前端"外部资料"面板据此渲染官网入口并排在首位），核到官网就不要让它留在空对象里。
-- `pictures[].url` 是绝对 HTTP(S) 地址，相对路径会返回 `invalid_picture`。图源、版次及转载许可分别核实，不因地址可访问就宣称权利已确认。
-- 图片可带 `version_label`（多语言）、`usage_period: {begin?, end?}`（至少一端非空）、`role`（启用的 `picture_role` 词表码）与 `asset_id`（存储资产 UUID）；使用时段不表示版权期限。数组首项是手动封面，`taken_at` 不决定排序。自托管图片先完成 `cover_image` 绑定，再写 `asset_id` 并回读，流程见[文件上传与绑定](file-upload.md)。
-- **不要**提交顶层 `cover_aspect` / `cover_image_url`：它们不在写入 DTO 里，严格解析会直接 `400 invalid_payload`。
-
-## content_unit
-
-    {
-      "entity": {
-        "kind": "content_unit",
-        "work_id": "<work-uuid>",
-        "title": "第 1 话：樱花抄",
-        "number": "1",
-        "position": 1,
-        "attributes": {},
-        "translations": {
-          "zh-CN": {"title": "第 1 话：樱花抄", "summary": ""},
-          "en-US": {"title": "Episode 1: Cherry Blossom"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "根据官方分集目录建立内容单位",
-      "sources": [{"kind": "url", "citation": "官方分集目录", "url": "https://example.org/episodes"}]
-    }
-
-`position` 是排序，`number` 是印刷/官方编号（字符串，保留 `A1`、`EX` 这类原文，不要改写成整数）。
-目录树用同一 Work 内的 `parent_id` 表达：卷、部、篇可以建 group 型 content_unit，再挂子项。
-
-## expression
-
-    {
-      "entity": {
-        "kind": "expression",
-        "work_id": "<work-uuid>",
-        "content_unit_id": "<content-unit-uuid>",
-        "title": "第 1 话 正片母版",
-        "position": 1,
-        "attributes": {"language": "ja", "duration": 1560},
-        "translations": {
-          "zh-CN": {"title": "第 1 话 正片母版"},
-          "en-US": {"title": "Episode 1 master"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "按官方分集目录建立可复用表达",
-      "sources": [{"kind": "url", "citation": "官方分集目录", "url": "https://example.org/episodes"}]
-    }
-
-`content_unit_id` 可以省略（表达直接挂在 Work 下）；给定时必须属于同一 Work。
-表达是**被 Track 复用的那一层**：同一录音、正文或母版在多个发行里复用；Work 身份相同不代表 Expression 相同，现场、伴奏、混音等按实际表达区分。
-
-## release
-
-    {
-      "entity": {
-        "kind": "release",
-        "title": "日本官方初版蓝光",
-        "original_language": "ja",
-        "subjects": [
-          {"work_id": "<main-work-uuid>", "role": "primary", "position": 0},
-          {"work_id": "<bonus-work-uuid>", "role": "compilation", "position": 1}
-        ],
-        "attributes": {
-          "catalog_number": "VWBS-1531",
-          "barcode": "4988104044952",
-          "edition_date": "2008-04-18",
-          "edition_type": "boxset",
-          "edition_batch": "first_press",
-          "country": "JPN",
-          "packaging": "boxset",
-          "distribution_channel": "physical"
-        },
-        "translations": {
-          "ja": {"title": "日本官方初版 Blu-ray"},
-          "zh-CN": {"title": "日本官方初版蓝光", "summary": "单碟发行"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "根据发行方目录核对品番、日期与包装",
-      "sources": [{"kind": "url", "citation": "发行方目录", "url": "https://example.org/release"}]
-    }
-
-- **`release` 没有 `work_id`**。`subjects` 列出被其载体实际收录表达的**全部** Work；`role` 取 `release_role` 词表
-  （`primary` 主作品 / `compilation` 汇编作品 / `supplement` 附加作品）。同一 `(work_id, role)` 只能出现一次。
-- 发行中作为曲目收录的 Work 使用 `track_work` role（可含官方确认的影音作品），且仅在当前 `document.vocabularies.release_role.terms.track_work.enabled` 时可用；它是 Release subject role，不是关系码。先写正确 subjects，再维护 Track contents；两者的跨实体步骤不是原子事务。
-- **发行版的版名由 `title` 承载**：没有 `edition_name` 字段。品番、条码、日期、版本类别、包装等字段码以
-  `GET /api/catalog/definitions` 声明为准，未声明的码会被拒绝。
-- 枚举字段填**词项代码**而不是显示名：`packaging` 取 `standard` / `jewel` / `slipcase` / `box` / `boxset` / `digipak`，
-  `edition_type` 取 `standard` / `limited` / `deluxe` / `boxset`，`distribution_channel` 取
-  `mixed` / `physical` / `digital` / `web`。显示名由前端按词表本地化，不要提交中文或英文显示名。
-- `publisher` 是 **entity 型字段**，值是主体实体 ID（字段名就是 `publisher`）；
-  与创作者/机构的署名关系仍走关系接口。
-
-## medium
-
-    {
-      "entity": {
-        "kind": "medium",
-        "release_id": "<release-uuid>",
-        "title": "Disc 1",
-        "position": 1,
-        "attributes": {"format": "bd", "role": "primary"},
-        "translations": {
-          "zh-CN": {"title": "第 1 张蓝光"},
-          "en-US": {"title": "Disc 1"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "按盒内实物顺序登记主载体",
-      "sources": [{"kind": "url", "citation": "包装实物图", "url": "https://example.org/package"}]
-    }
-
-`parent_id` 只能指向同一 Release 的 Medium（分卷、子容器）。`format` 取词项代码
-（`cd` / `bd` / `uhd_bd` / `dvd` / `vinyl` / `sacd` / `cassette` / `paper` / `digital` / `web`），
-`role` 取 `primary` / `supplement` / `side` / `extra` / `commentary`；多碟装各自的品番写在 `medium.attributes.catalog_number`。
-
-## track
-
-下例是服务端创建载荷。`mf-workspace` 可在同一批中先建作用域与表达，再以 `$ref` 创建 Track.contents；已存在 Track 的隐藏收录仍使用专用 contents 端点。
-
-    {
-      "entity": {
-        "kind": "track",
-        "medium_id": "<medium-uuid>",
-        "title": "第 1 话：樱花抄",
-        "position": 1,
-        "attributes": {"duration": 1560, "role": "primary"},
-        "contents": [
-          {
-            "expression_id": "<expression-uuid>",
-            "position": 1,
-            "locator": {"relative_to": "track", "time_start_ms": 0, "time_end_ms": 1560000}
-          }
-        ],
-        "translations": {
-          "zh-CN": {"title": "第 1 话：樱花抄"},
-          "en-US": {"title": "Episode 1: Cherry Blossom"}
-        }
-      },
-      "expected_version": 0,
-      "edit_note": "按蓝光目录建立第 1 轨并关联表达",
-      "sources": [{"kind": "url", "citation": "碟面目录", "url": "https://example.org/disc-1"}]
-    }
-
-- **`contents` 是唯一收录来源**，新版项为 `{expression_id, position, locator, attributes?, sources?}`；先核目标实例 DTO，旧版可能不接受 sources。
-  单内容引用走 `contents`（`expression_id` + `position` + `locator`），不要另加引用字段。
-- `Track.contents` 是结构性收录，不是 relations。Release `subjects` 先声明实际收录的 Work，再建立对应 Track contents；两步不具跨实体原子性。
-- **Track 上没有 `work_id`**：所属 Work 由 `medium → release → subjects` 推导。
-  提交 `work_id` 会因为不在该 kind 的允许字段里被拒绝。
-- 同一 Track 内 `position` 唯一；同一 `expression_id` **且 locator 完全相同**才算重复收录。
-  同一表达按不同时间段切片可以在同一 Track 多次出现（如混音轨引用 0–30s 与 60–90s）。
-- `locator` 按当前 definitions 的组字段校验；锚点与区间规则见 [定位字段](types-and-fields.md#locator)，整轨收录允许空 locator。
-
-书籍场景的 locator 示例：
-
-    "locator": {"relative_to": "medium", "page_start": 12, "page_end": 40, "chapter": "第 1 章"}
-
-### 单条收录（先核 OpenAPI 支持）
-
-    POST /api/catalog/tracks/<track-uuid>/contents
-    {
-      "inclusion": {
-        "expression_id": "<expression-uuid>",
-        "position": 0,
-        "locator": {},
-        "attributes": {},
-        "sources": [{"kind": "url", "citation": "官方目录确认本轨收录该录音", "url": "https://example.org/disc"}]
-      },
-      "expected_version": 7,
-      "edit_note": "依据官方曲目表增加本轨录音收录",
-      "sources": [{"kind": "url", "citation": "官方曲目表", "url": "https://example.org/disc"}]
-    }
-
-expected_version 来自 Track。PUT `/api/catalog/tracks/{id}/contents/{position}` 使用相同信封，URL 为回读的旧位置，inclusion.position 可以重排。DELETE 同路径只提交 expected_version/edit_note/sources；不要省略请求体。写后回读 Track、occurrences 与修订，409 时回读并合并；不要根据不可见记录的猜测位置操作。不可见收录或旧 position 无法核实时停止该项操作并报告未知。Track contents 来源省略规则见[API 行为参考](api-behavior.md)。
-
-### 提交审核与单条收录
-
-普通提交返回 202 / pending_review / applied=false，保留同一 ID 等待审核，不回写模拟版本。只有免审提交立即生效。单条 Track 收录放入 operations：
-
-```json
-{"target":"entity","action":"content","id":"<track-uuid>","base_version":7,"content_change":{"action":"replace","position":0,"inclusion":{"expression_id":"<expression-uuid>","position":0,"locator":{}}},"source_refs":[{"source":"official"}]}
+```http
+POST /api/catalog/workspaces
 ```
 
-`content_change.action` 可为 add / replace / delete，删除省略 inclusion。位置必须来自可见记录，Track 整体版本冲突时重新核对，不猜隐藏收录位置。
+```json
+{"name":"修订发行资料","entity_ids":["11111111-1111-4111-8111-111111111111"],"relation_ids":[]}
+```
 
-## 关系
+返回 workspace 的 id、version、head_commit_id、objects 与 dirty_count。objects 区分 base、committed 和 document；新副本还没有 head。后续 checkout 用 `POST /api/catalog/workspaces/{id}/checkout`，传 `{expected_version,entity_ids,relation_ids}` 加入其他正式对象。
 
-    POST /api/catalog/relations
-    {
-      "relation": {
-        "type": "adaptation_of",
-        "source_id": "<work-uuid>",
-        "target_id": "<other-work-uuid>",
-        "position": 0,
-        "attributes": {}
-      },
-      "expected_version": 0,
-      "edit_note": "官方说明该作为原作的改编",
-      "sources": [{"kind": "url", "citation": "官方说明", "url": "https://example.org/about"}]
-    }
+暂存已有对象修改：
 
-- 关系码与允许的两端 `source_kinds` / `target_kinds` 来自 `GET /api/catalog/definitions` 的 `document.relations`，
-  只使用其中 `enabled` 的条目；关系码清单只从 `document.relations` 取。
-  方向、端点与属性及约束见 [关系规则](relations.md)。
-- 更新用 `PUT /api/catalog/relations/{id}`；删除用 `DELETE /api/catalog/relations/{id}`，
-  **必须带 body**（`expected_version` + `edit_note` + `sources`），不带版本 → 409，完全不带 body → 400。
+```http
+PUT /api/catalog/workspaces/{id}/changes
+```
 
-## 读回检查
+```json
+{
+  "expected_version":1,
+  "operations":[
+    {"target":"entity","action":"update","id":"11111111-1111-4111-8111-111111111111","patch":[
+      {"path":"/title","value":"发行方使用的原始名称"},
+      {"path":"/attributes/obsolete_field","remove":true}
+    ]}
+  ]
+}
+```
 
-不要只凭 2xx 判定成功。至少重新 GET：
+示例字段需换成当前定义中实际存在的字段，删除路径也须对应实际事实。`patch` 使用 JSON Pointer；value 可以是 null，删除使用 remove。对象字段逐键处理，数组按完整值替换。`mf-workspace stage --file operations.json` 的文件内容只放上例 operations 数组。
 
-- `/api/catalog/entities/{id}`（实体本体与 `version`）；
-- `/api/catalog/entities/{id}/links`（关系、字段引用与端点实体，按 has_more 分页）；
-- `/api/catalog/entities/{id}/occurrences`（表达/内容单位的反向收录）；
-- `/api/catalog/entities/{id}/revisions`（核对本次修订与证据；快照及可见性限制见[API 行为参考](api-behavior.md)）；
-- 实例支持时，`/api/catalog/expressions/{id}/composition` 与 `/api/catalog/releases/{id}/editions` 核对直接组成和显式版本组；不由 subjects 推测；
-- 实体对比用 `/api/catalog/compare?ids=<id1>,<id2>`，返回 `items[].entity` 与 `items[].children`；发行/载体的子项形状是 `{medium, tracks}`，其他 kind 的 `children` 为空。
+新建多个关联对象时按依赖顺序声明 ref：
 
-核对返回的 ID、归属（work / release / medium）、`position`、翻译回退、`pictures` 与 revision 内容是否与预期一致。
-收到 409 `version_conflict` 时先回读再决定是否重放；响应不明时先查状态，不要盲目重试创建或自动删除已成功的数据。
+```json
+{
+  "expected_version":2,
+  "operations":[
+    {"target":"entity","action":"create","ref":"work","document":{
+      "kind":"work","title":"桜","original_language":"ja","translations":{"ja":{"title":"桜"}},"attributes":{}
+    }},
+    {"target":"entity","action":"create","ref":"expression","document":{
+      "kind":"expression","work_id":{"$ref":"work"},"title":"桜","original_language":"ja","translations":{"ja":{"title":"桜"}},"attributes":{}
+    }}
+  ]
+}
+```
 
-## 外部来源只读查询
+名称仅为载荷示例，不构成真实编目。返回 `refs` 将本批 ref 映射到稳定 UUID；之后的 stage 和 commit 直接使用该 UUID。document 直接放 Entity 或 Relation，不包 entity/relation，不填写服务端 id、version、state 等字段。
 
-写导入路径（`POST /api/importer/*` 与 `catalog.import.submit`）已删除。使用：
+提交、推送：
 
-- `GET /api/external-sources` — 列出真有适配器的来源（bangumi/dlsite/dmm）
-- `POST /api/external-sources/query` — `op=search|lookup|detail`，返回 raw + FetchMeta（url/fetched_at/content_hash）；lookup/detail 另含既有 preview 映射
+```http
+POST /api/catalog/workspaces/{id}/commits
+```
 
-落库请走实体 / 关系端点或提交工作流；外部库 GUI 注册新码不会自动实现抓取适配器。
-需要逐项审查、失败可恢复与可追溯修订时，使用上面的实体与关系端点。
+```json
+{"id":"22222222-2222-4222-8222-222222222222","expected_version":3,"message":"修订发行资料"}
+```
+
+```http
+POST /api/catalog/workspaces/{id}/push
+```
+
+```json
+{"expected_version":4,"expected_head":"22222222-2222-4222-8222-222222222222","title":"修订发行资料"}
+```
+
+commit 的 author 是执行提交的账号，authors 保留修改贡献者，merged_by 单独记录合并者。PR 的只读 source_base_id 固定本次提交链基线。
+
+version 使用最新读取的副本值；commit 后必要时 GET 副本获取，不按例子或提交次数递增猜测。push 前提交所有未提交改动。`applied=true` 才改变正式目录；普通用户返回 `applied=false` 及 PR。非副本成员的审核人合并时，结果中的 workspace 可为 null；只读取返回的冻结 PR 和提交，不再获取源副本。连续多次 commit 后可一同 push；同一个已确认 head 的 push 可读取相同合入结果或 PR。
+
+PR 可用 `POST /api/catalog/pull-requests` 创建，传 `{workspace_id,expected_version,expected_head,title}`；读取 `/api/catalog/pull-requests/{id}`。合并传 PR 自己的 version 与 source_head_id：
+
+```http
+POST /api/catalog/pull-requests/{id}/merge
+```
+
+```json
+{"expected_version":1,"expected_head":"22222222-2222-4222-8222-222222222222"}
+```
+
+副本成员替换用 `PUT /api/catalog/workspaces/{id}/members` 和 `{expected_version,user_ids}`；只有拥有者可管理成员。工作副本与 PR 列表按实例的 limit/offset 分页，不能把一页视作全集。
+
+## 冲突解决
+
+push 或 PR merge 的 `workspace_conflict` 返回每个冲突的 base/current/proposed、pointer、current_version。rebase 使用以下请求；resolutions 的 value 是明确选择或手动合并后的 JSON 值，不是 ours/theirs 字符串指令：
+
+```http
+POST /api/catalog/workspaces/{id}/rebase
+```
+
+```json
+{
+  "id":"33333333-3333-4333-8333-333333333333",
+  "expected_version":5,
+  "expected_head":"22222222-2222-4222-8222-222222222222",
+  "message":"合并并发题名修改",
+  "resolutions":[
+    {"target":"entity","id":"11111111-1111-4111-8111-111111111111","pointer":"/title","current_version":8,"value":"合并后的题名"}
+  ]
+}
+```
+
+删除路径传 remove=true，不能同时带 value。pointer 原样使用冲突响应中的值；整对象级冲突不能随意当作单字段处理。本地 `rebase --file resolutions.json` 接收 resolutions 数组。rebase 生成新提交而不改变正式目录，随后重新 push。
+
+## 模型 DTO
+
+| kind | 结构字段 |
+| --- | --- |
+| agent / collection / work | 没有固定父级 |
+| content_unit | 必须 work_id，可有同 Work 的 parent_id |
+| expression | 必须 work_id，可有同 Work 的 content_unit_id；没有 parent_id |
+| release | subjects 声明 Work，没有 work_id |
+| medium | 必须 release_id，可有同 Release 的 parent_id |
+| track | 必须 medium_id，可有同 Medium 的 parent_id；contents 引用 Expression |
+
+- title 保存对象自身名称。Work 只写作品名，Release 原样保存发行方的版本名称；不自行添加 `[CD]`、品番或“初版”等后缀。
+- translations 是 `{locale:{title,summary?,body?,aliases?}}`，原语言内容也可满足语言资料要求。没有官方中文译名时不补造。
+- attributes 使用当前适用于 kind 的字段；枚举填词项 code。外部标识是 `external_links:[{kind,url,external_id?}]`，不是旧 external_ids 对象。
+- subjects 是 `[{work_id,role,position,attributes?}]`。Track.contents 是 `[{expression_id,position,locator,attributes?,sources?}]`，收录来源可省略。
+- Relation document 是 `{type,source_id,target_id,attributes?}`；两端 kind、方向和属性由 definitions.document.relations 决定。
+- Track 的单条收录可暂存 `{"target":"entity","action":"content","id":"TRACK_UUID","content_change":{"action":"replace","position":0,"inclusion":{"expression_id":"EXPRESSION_UUID","position":0,"locator":{}}}}`；content_change.position 使用副本中当前记录位置，未知或不可见内容不可凭猜测覆盖。
+- pictures 是图片数组，url 为绝对 HTTP(S)，可带 caption、source、asset_id 等；图片来源可省略，已有资料保留。正文与图片仍通过副本提交，文件上传另见[文件绑定](file-upload.md)。
+
+字段形状见[字段](types-and-fields.md)，层级与复用见[数据模型](data-model.md)，并发恢复见[工作流程](workflow.md)。外部来源只读查询使用 `/api/external-sources`，不直接写目录。

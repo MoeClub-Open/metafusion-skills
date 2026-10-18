@@ -212,7 +212,7 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
     : { ok: false, outcome: "partial", reason: "response_shape_invalid" };
 }
 export function helpText() {
-  return "mf-platform list | schema [action] | --plan plan.json [--out result.json]\n只读目录查询；编辑使用 mf-workspace checkout/commit/preview/push，不支持旧写计划或 --apply。";
+  return "mf-platform list | schema [action] | --plan plan.json [--out result.json]\n只读目录查询；编辑使用 mf-workspace init/checkout/stage/commit/push，不支持旧写计划或 --apply。";
 }
 export async function runCli(
   argv = process.argv.slice(2),

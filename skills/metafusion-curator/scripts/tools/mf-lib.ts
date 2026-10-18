@@ -2,21 +2,19 @@
 //
 // 设计约束：**不另建 HTTP 客户端**——全部走本技能自带的 ../metafusion-api.ts（PAT 认证、
 // 只在凭据存在时发请求、GET 按 Retry-After 重试）。这里只补齐编目任务反复需要、而通用客户端
-// 不含的三类能力：
+// 不含的能力：
 //   1. 常用读取原语（按 kind 分页、关系、失败时显式报错而不是返回空）；
-//   2. 预检与并集合并引擎（含"身份冲突守卫"与两处后端缺陷绕行）；
-//   3. 来源/证据构造小工具。
+//   2. 重复身份合并的只读预检与副本提交。
 //
 // 口径（写死在实现里，避免每个调用方各自解释）：
 //   · **取数失败必须抛错**，绝不退化成 undefined/空集后被误读成"数据有问题"。
 //   · **同键异值的外部标识 = 两侧指向不同真实对象**，合并前一律拒绝。
 //   · 403/429 不等于失效；404 只表明当前调用者不可见或目标不存在。
 
-import { request, listAll, publicFailure } from "../metafusion-api.ts";
+import { request, listAll } from "../metafusion-api.ts";
 
 import { randomUUID } from "node:crypto";
-import { diffDocument, identityPatch } from "./mf-workspace.ts";
-import { findIdentity } from "./mf-find-identity.ts";
+import { diffDocument } from "./mf-workspace.ts";
 import { readEntityLinks } from "./mf-links.ts";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,36 +31,6 @@ export const KINDS = [
   "medium",
   "track",
 ];
-
-/** 来源/证据构造（与 references/source-policy.md 一致）。 */
-export const src = (url, citation) => ({ kind: "url", url, citation });
-export const selfEvidence = (citation) => ({ kind: "self", citation });
-const SOURCE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-export function withCommitSourceRefs(sources) {
-  if (!Array.isArray(sources) || !sources.length)
-    throw new Error("commit_evidence_required");
-  const used = new Set();
-  for (const source of sources) {
-    if (source?.key === undefined) continue;
-    if (typeof source.key !== "string" || !SOURCE_KEY_PATTERN.test(source.key))
-      throw new Error("invalid_source_key");
-    if (used.has(source.key)) throw new Error("duplicate_source_key");
-    used.add(source.key);
-  }
-  let counter = 0;
-  const keyed = sources.map((source) => {
-    if (source?.key !== undefined) return source;
-    let key;
-    do {
-      counter += 1;
-      key = `src${counter}`;
-    } while (used.has(key));
-    used.add(key);
-    return { ...source, key };
-  });
-  const refs = keyed.map((source) => ({ source: source.key }));
-  return { sources: keyed, refs };
-}
 
 /** 读取单个实体；404 返回 null，其它非 200 一律抛错。 */
 export async function getEntity(id) {
@@ -220,7 +188,7 @@ export function identityConflicts(keep, lose) {
  * 并集候选：把 lose 侧独有的值并入 keep；conflicts 非空时实际合并拒绝。
  * pictures 取并集；translations 语种内**逐键**并集；attributes 数组并集/对象浅并集；
  * external_links 按键并集；track 的 contents 按 expression_id + locator 区分收录。
- * 返回 { entity, changes, conflicts } —— conflicts 是"同键异值、保留本方"的项（会写进 edit_note）。
+ * 返回 { entity, changes, conflicts } —— conflicts 是"同键异值、保留本方"的项。
  */
 export function unionInto(keep, lose, { kind }: Record<string, any> = {}) {
   const changes = [];
@@ -348,302 +316,130 @@ export function unionInto(keep, lose, { kind }: Record<string, any> = {}) {
 }
 
 /**
- * 合并一个重复对：先预检当前实体、版本、身份和关系，再并集/删重复边/lifecycle。
- * 这是多个独立 API 事务；返回 atomic=false 与 completedSteps，失败后停止，不自动回滚或重试写入。
- * sources 必须由调用者核验，覆盖两端身份、保留字段与图片使用权；self 不足以支撑合并事实。
+ * 合并重复身份属于管理员生命周期动作。预合并事实和冗余边先在同一服务器副本
+ * 暂存、提交、push；只有已应用时才继续身份合并。二者不是跨服务原子事务。
+ * pending PR、冲突或未知结果都会停止，不自动重放写入；来源仅为可选元数据。
  */
 export async function mergeEntity({
-  kind,
-  keep,
-  lose,
-  scopeNote,
-  dryRun = true,
-  relationType = "same-scope duplicate",
-  sources = [],
-  reviewedCandidateIDs = [],
+  kind, keep, lose, scopeNote = "", dryRun = true,
+  relationType = "same-scope duplicate", sources = [], requestFn = request,
 }: Record<string, any>) {
-  let changes = [],
-    conflicts = [],
-    edgeDeletes = 0;
+  let changes = [], conflicts = [], edgeDeletes = 0;
   const completedSteps = [];
+  let mainChanged = false, workspaceID, commitID;
   const result = (ok, reason, extra = {}) => ({
-    ok,
-    reason,
-    changes,
-    conflicts,
-    edgeDeletes,
-    atomic: false,
-    partial: !ok && completedSteps.length > 0,
-    completedSteps: [...completedSteps],
-    ...extra,
+    ok, reason, changes, conflicts, edgeDeletes, atomic: false,
+    partial: !ok && mainChanged, completedSteps: [...completedSteps],
+    ...(workspaceID ? { workspace_id: workspaceID } : {}),
+    ...(commitID ? { commit_id: commitID } : {}), ...extra,
   });
-  const evidenceValid =
-    Array.isArray(sources) &&
-    sources.length > 0 &&
-    sources.every((s) => {
-      if (
-        !["url", "publication"].includes(s?.kind) ||
-        !String(s.citation || "").trim()
-      )
-        return false;
-      if (s.kind === "publication") return true;
-      try {
-        const url = new URL(s.url);
-        return (
-          ["https:", "http:"].includes(url.protocol) &&
-          !url.username &&
-          !url.password
-        );
-      } catch {
-        return false;
-      }
-    });
-  if (!dryRun && !evidenceValid)
-    return result(
-      false,
-      "evidence_required: 提供已核验的真实 url/publication 来源，不能使用 self",
-    );
-  if (!keep?.id || !lose?.id || keep.id === lose.id)
-    return result(false, "invalid_merge_pair");
-  if (!Array.isArray(reviewedCandidateIDs)) return result(false, "invalid_identity_review");
-
-  // 两端版本和关系都在任何写入前检查，防止把过时并集覆盖到刚读取的新版本上。
-  const [currentKeep, currentLose] = await Promise.all([
-    getEntity(keep.id),
-    getEntity(lose.id),
-  ]);
-  if (!currentKeep || !currentLose)
-    return result(false, "实体对当前调用者不可见或不存在");
-  if (currentLose.state === "merged") return result(true, "already-merged");
-  if (
-    currentKeep.version !== keep.version ||
-    currentLose.version !== lose.version
-  )
-    return result(false, "version_conflict: 预检版本已改变，回读后重新审查");
-  if (
-    kind !== currentKeep.kind ||
-    kind !== currentLose.kind ||
-    currentKeep.state !== "active" ||
-    ["deleted", "merged"].includes(currentLose.state)
-  )
-    return result(false, "invalid_kind_or_status");
-  if (
-    currentKeep.title !== currentLose.title ||
-    scopeKey(kind, currentKeep) !== scopeKey(kind, currentLose)
-  )
-    return result(false, "identity_or_scope_mismatch");
-  conflicts = identityConflicts(currentKeep, currentLose);
-  for (const key of ["number", "position"]) {
-    if (
-      ["content_unit", "medium", "track"].includes(kind) &&
-      j(currentKeep[key]) !== j(currentLose[key])
-    )
-      conflicts.push(key);
-  }
-  if (conflicts.length) return result(false, "identity_conflict");
-  const union = unionInto(currentKeep, currentLose, { kind });
-  changes = union.changes;
-  conflicts = union.conflicts;
-  if (conflicts.length)
-    return result(false, "field_conflict: 不自动丢弃对侧不同值");
-  const mergedEntity: Record<string, any> = { ...currentKeep, ...union.entity },
-    patch = diffDocument(currentKeep, mergedEntity, "entity");
-  let identityReview;
-  if (identityPatch(patch)) {
-    if (!Array.isArray(reviewedCandidateIDs) || reviewedCandidateIDs.length > 1000 ||
-        new Set(reviewedCandidateIDs).size !== reviewedCandidateIDs.length ||
-        reviewedCandidateIDs.some((id) => id === keep.id || typeof id !== "string" ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)))
-      return result(false, "invalid_identity_review");
-    const scope = ["expression", "content_unit"].includes(kind)
-      ? { workId: mergedEntity.work_id }
-      : kind === "medium" ? { releaseId: mergedEntity.release_id }
-      : kind === "track" ? { mediumId: mergedEntity.medium_id } : {};
-    if (Object.values(scope).some((id) => typeof id !== "string" || !id))
-      return result(false, "identity_scope_unverified");
-    const review = await findIdentity({
-      kind, ...scope,
-      titles: [mergedEntity.title, ...Object.values<Record<string, any>>(mergedEntity.translations ?? {}).map((t) => t?.title).filter(Boolean)],
-      externalIds: linksToCriteria(mergedEntity.external_links),
-    });
-    if (!review.coverage.complete || review.unknown.length || review.errors.length)
-      return result(false, "identity_review_unverified", { identity_review: review });
-    const candidateIDs = review.candidates
-      .filter((c) => c.canonical_id !== keep.id)
-      .map((c) => c.canonical_id).sort();
-    if (candidateIDs.some((id) => typeof id !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)))
-      return result(false, "identity_review_unverified", { identity_review: review });
-    const allowed = new Set([lose.id, ...reviewedCandidateIDs]),
-      unreviewed = candidateIDs.filter((id) => !allowed.has(id));
-    if (unreviewed.length)
-      return result(false, "identity_review_required", {
-        identity_review: review, unreviewed_candidate_ids: unreviewed,
-      });
-    if (reviewedCandidateIDs.some((id) => id !== lose.id && !candidateIDs.includes(id)))
-      return result(false, "identity_candidates_changed", { identity_review: review });
-    // Choosing this duplicate pair explicitly reviews lose; third identities
-    // require the caller's explicit review, never automatic acceptance.
-    identityReview = candidateIDs;
-  } else if (reviewedCandidateIDs.length) return result(false, "invalid_identity_review");
-  const [keepRels, loseRels] = await Promise.all([
-    relationsOf(keep.id),
-    relationsOf(lose.id),
-  ]);
-  const key = (r, selfId) =>
-    `${r.source_id === selfId ? "out" : "in"}|${r.type}|${r.source_id === selfId ? r.target_id : r.source_id}|${j(r.attributes)}`;
-  const keepSet = new Set(keepRels.map((r) => key(r, keep.id)));
-  const duplicateEdges = loseRels.filter((r) => keepSet.has(key(r, lose.id)));
-  if (
-    loseRels.some(
-      (r) =>
-        (r.source_id === lose.id ? keep.id : r.source_id) ===
-        (r.target_id === lose.id ? keep.id : r.target_id),
-    )
-  ) {
-    return result(false, "merge_would_create_self_loop");
-  }
-  if (duplicateEdges.some((r) => !r.id || !Number.isInteger(r.version)))
-    return result(false, "invalid_relation_version");
-  const baseNote =
-    `合并重复（${relationType}）：同 kind、同作用域（${scopeNote}）、题名逐字相同` +
-    (changes.length
-      ? `；并入已核验的对侧独有值（${changes.join("；")}）`
-      : "") +
-    "；多步非原子操作";
-  if (dryRun)
-    return result(true, "dry-run", {
-      applicable: evidenceValid,
-      plannedEdgeDeletes: duplicateEdges.length,
-      evidenceRequired: !evidenceValid,
-      entity: { ...(await writable(currentKeep)), ...union.entity },
-      ...(identityReview !== undefined ? { reviewed_candidate_ids: identityReview } : {}),
-    });
-
+  const readEntity = async (id) => {
+    const r = await requestFn(`/api/catalog/entities/${encodeURIComponent(id)}`);
+    if (r.status !== 200) throw new Error(`entity_read_failed:${r.status}`);
+    return r.body;
+  };
+  const write = (pathname, method, body) => requestFn(pathname, { method, body, tries: 1 });
+  const checkWrite = (r, step) => {
+    if (!r || r.status === 0 || r.status >= 500) throw new Error(`${step}_result_unknown`);
+    if (r.status < 200 || r.status >= 300) throw new Error(`${step}_rejected:${r.status}:${r.body?.error ?? ""}`);
+    return r.body;
+  };
+  if (!keep?.id || !lose?.id || keep.id === lose.id) return result(false, "invalid_merge_pair");
   try {
-    if (changes.length) {
-      const defs = await request("/api/catalog/definitions");
-      if (defs.status !== 200 || !defs.body?.etag)
-        return result(false, "definitions_unavailable");
-      let keyedSources = sources,
-        sourceRefs = [];
-      try {
-        ({ sources: keyedSources, refs: sourceRefs } = withCommitSourceRefs(sources));
-      } catch {
-        return result(false, "evidence_required: 提交来源缺少可用的 key 映射");
-      }
-      const commit = {
-        id: randomUUID(),
-        definitions_etag: defs.body.etag,
-        edit_note: baseNote,
-        sources: keyedSources,
-        operations: [
-          {
-            target: "entity",
-            action: "update",
-            id: keep.id,
-            base_version: currentKeep.version,
-            patch,
-            source_refs: sourceRefs,
-            ...(identityReview !== undefined ? { reviewed_candidate_ids: identityReview } : {}),
-          },
-        ],
-      };
-      const w = await request("/api/catalog/commits", {
-        method: "POST",
-        body: commit,
-        tries: 1,
-      });
-      if(w.status===202 && w.body?.review_status==="pending_review" && w.body?.applied===false)
-        return result(false,"pending_review_stop_merge",{commit_id:commit.id,applied:false,queued:true});
-      if (w.status === 0 || w.status >= 500)
-        return result(false, "commit_push_unknown", {
-          commit_id: commit.id,
-          applied: null,
-        });
-      if (
-        w.status === 200 &&
-        (w.body?.applied !== true ||
-          w.body.id !== commit.id ||
-          w.body.items?.length !== 1)
-      )
-        return result(false, "commit_receipt_invalid", {
-          commit_id: commit.id,
-          applied: null,
-        });
-      if (w.status < 200 || w.status >= 300)
-        return w.status === 409 && w.body?.error === "identity_candidates_changed"
-          ? result(false, "identity_candidates_changed", { identity_review: publicFailure(w).identity_review })
-          : result(
-          false,
-          `并集 commit HTTP ${w.status} ${w.body?.error ?? ""}`.trim(),
-        );
-      completedSteps.push("keep_union");
-      const readback = await getEntity(keep.id);
-      if (
-        !readback ||
-        readback.version !== w.body?.items?.[0]?.version ||
-        Object.entries(union.entity).some(([k, v]) => j(readback[k]) !== j(v))
-      ) {
-        return result(false, "readback_mismatch: 并集写后未核验，停止");
-      }
+    const [currentKeep, currentLose] = await Promise.all([readEntity(keep.id), readEntity(lose.id)]);
+    if (currentLose.state === "merged") return result(true, "already-merged");
+    if (currentKeep.version !== keep.version || currentLose.version !== lose.version)
+      return result(false, "version_conflict: 回读后重新计算并集");
+    if (kind !== currentKeep.kind || kind !== currentLose.kind ||
+        currentKeep.state !== "active" || currentLose.state !== "active")
+      return result(false, "invalid_kind_or_state");
+    if (currentKeep.title !== currentLose.title || scopeKey(kind, currentKeep) !== scopeKey(kind, currentLose))
+      return result(false, "identity_or_scope_mismatch");
+    conflicts = identityConflicts(currentKeep, currentLose);
+    for (const key of ["number", "position"]) {
+      if (["content_unit", "medium", "track"].includes(kind) && j(currentKeep[key]) !== j(currentLose[key])) conflicts.push(key);
     }
-    for (const r of duplicateEdges) {
-      const d = await request(
-        `/api/catalog/relations/${encodeURIComponent(r.id)}`,
-        {
-          method: "DELETE",
-          body: {
-            expected_version: r.version,
-            edit_note:
-              "合并前置：删除与保留方同方向、同类型、同属性的冗余关系边；多步非原子操作",
-            sources,
-          },
-        },
-      );
-      if (d.status < 200 || d.status >= 300)
-        return result(false, `删冗余边失败 HTTP ${d.status}；停止后续合并`);
-      edgeDeletes += 1;
-      completedSteps.push(`delete_relation:${r.id}`);
+    if (conflicts.length) return result(false, "identity_conflict");
+    const union = unionInto(currentKeep, currentLose, { kind });
+    changes = union.changes;
+    conflicts = union.conflicts;
+    if (conflicts.length) return result(false, "field_conflict: 不自动丢弃不同值");
+    const patch = diffDocument(currentKeep, { ...currentKeep, ...union.entity }, "entity");
+    const links = await Promise.all([readEntityLinks(keep.id, { requestFn }), readEntityLinks(lose.id, { requestFn })]);
+    const edges = links.map((page) => page.items.filter((l) => l.class === "semantic").map((l) => ({
+      id: l.key, version: l.version, type: l.rule_code.slice("relation:".length),
+      source_id: l.source_id, target_id: l.target_id, position: l.position, attributes: l.attributes ?? {},
+    })));
+    const key = (r, self) => `${r.source_id === self ? "out" : "in"}|${r.type}|${r.source_id === self ? r.target_id : r.source_id}|${j(r.attributes)}`;
+    const keepSet = new Set(edges[0].map((r) => key(r, keep.id)));
+    const duplicateEdges = edges[1].filter((r) => keepSet.has(key(r, lose.id)));
+    if (edges[1].some((r) => (r.source_id === lose.id ? keep.id : r.source_id) === (r.target_id === lose.id ? keep.id : r.target_id)))
+      return result(false, "merge_would_create_self_loop");
+    if (duplicateEdges.some((r) => !r.id || !Number.isInteger(r.version))) return result(false, "invalid_relation_version");
+    const operations = [
+      ...(patch.length ? [{ target: "entity", action: "update", id: keep.id, patch }] : []),
+      ...duplicateEdges.map((r) => ({ target: "relation", action: "delete", id: r.id })),
+    ];
+    const message = `合并重复（${relationType}）：${scopeNote || kind}；保留 ${keep.id}，归并 ${lose.id}`;
+    if (dryRun) return result(true, "dry-run", { operations, plannedEdgeDeletes: duplicateEdges.length });
+    if (operations.length) {
+      let workspace = checkWrite(await write("/api/catalog/workspaces", "POST", {
+        name: message, entity_ids: [keep.id, lose.id], relation_ids: duplicateEdges.map((r) => r.id),
+      }), "workspace_create");
+      workspaceID = workspace?.id;
+      if (!workspaceID || !Number.isInteger(workspace.version) || !Array.isArray(workspace.objects))
+        return result(false, "workspace_receipt_invalid", { applied: false });
+      completedSteps.push("workspace_created");
+      const expectedObjects = [
+        { target: "entity", id: keep.id, version: currentKeep.version },
+        { target: "entity", id: lose.id, version: currentLose.version },
+        ...duplicateEdges.map((r) => ({ target: "relation", id: r.id, version: r.version })),
+      ];
+      if (expectedObjects.some((o) => workspace.objects.find((x) => x.target === o.target && x.id === o.id)?.base_version !== o.version))
+        return result(false, "version_conflict: fork基线已改变", { applied: false });
+      const root = `/api/catalog/workspaces/${encodeURIComponent(workspaceID)}`;
+      const staged = checkWrite(await write(`${root}/changes`, "PUT", { expected_version: workspace.version, operations }), "workspace_stage");
+      workspace = staged?.workspace;
+      if (!workspace || workspace.id !== workspaceID || !Number.isInteger(workspace.version))
+        return result(false, "workspace_receipt_invalid", { applied: false });
+      completedSteps.push("staged");
+      commitID = randomUUID();
+      const commit = checkWrite(await write(`${root}/commits`, "POST", { id: commitID, expected_version: workspace.version, message }), "workspace_commit");
+      if (commit?.id !== commitID || commit.workspace_id !== workspaceID)
+        return result(false, "commit_receipt_invalid", { applied: false });
+      completedSteps.push("committed");
+      const refreshed = await requestFn(root);
+      if (refreshed.status !== 200 || refreshed.body?.head_commit_id !== commitID)
+        return result(false, "workspace_head_unverified", { applied: false });
+      workspace = refreshed.body;
+      const pushed = checkWrite(await write(`${root}/push`, "POST", {
+        expected_version: workspace.version, expected_head: commitID, title: message,
+      }), "workspace_push");
+      if (pushed?.applied === false && pushed?.pull_request?.id)
+        return result(false, "pull_request_open_stop_merge", { applied: false, pull_request: pushed.pull_request });
+      if (pushed?.applied !== true) return result(false, "push_receipt_invalid", { applied: null });
+      mainChanged = true;
+      completedSteps.push("workspace_merged");
+      edgeDeletes = duplicateEdges.length;
+      const readback = await readEntity(keep.id);
+      if (Object.entries(union.entity).some(([k, v]) => j(readback[k]) !== j(v)))
+        return result(false, "readback_mismatch: 停止身份合并", { applied: true });
     }
-    const current = await getEntity(lose.id);
-    if (
-      !current ||
-      current.version !== currentLose.version ||
-      current.state === "merged"
-    )
-      return result(false, "version_conflict: 合并前对象已改变；停止");
-    const m = await request(
-      `/api/catalog/entities/${encodeURIComponent(lose.id)}/lifecycle`,
-      {
-        method: "POST",
-        body: {
-          expected_version: current.version,
-          target_id: keep.id,
-          edit_note: baseNote,
-          sources,
-        },
-      },
-    );
-    if (m.status !== 200)
-      return result(
-        false,
-        `合并 HTTP ${m.status} ${m.body?.error ?? ""}`.trim(),
-      );
+    const current = await readEntity(lose.id);
+    if (current.version !== currentLose.version || current.state !== "active")
+      return result(false, "version_conflict: 合并前对象已改变", { applied: mainChanged });
+    const lifecycle = await write(`/api/catalog/entities/${encodeURIComponent(lose.id)}/lifecycle`, "POST", {
+      expected_version: current.version, target_id: keep.id, edit_note: message,
+      ...(sources.length ? { sources } : {}),
+    });
+    const merged = checkWrite(lifecycle, "lifecycle");
+    if (lifecycle.status !== 200 || merged?.state !== "merged" || merged.redirect_id !== keep.id)
+      return result(false, "lifecycle_receipt_invalid", { applied: mainChanged ? true : null });
     completedSteps.push("lifecycle");
-    return result(true, "merged");
+    return result(true, "merged", { applied: true });
   } catch (error) {
-    return result(
-      false,
-      `合并步骤读取或回读失败：${String(error)}；停止后续写入`,
-    );
+    return result(false, String(error?.message ?? error), { applied: mainChanged ? true : null });
   }
-}
-
-async function writable(entity) {
-  // 交给技能客户端剔除只读投影字段，避免整实体 PUT 被 DisallowUnknownFields 拒绝。
-  const { writableEntity } = await import("../metafusion-api.ts");
-  return writableEntity(entity);
 }
 
 /** 从重复组里挑保留方：正常条目优先，其次字段更全。 */

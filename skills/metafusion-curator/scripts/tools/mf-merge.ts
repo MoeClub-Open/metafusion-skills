@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// 合并同作用域重复候选（来源预检 + 并集 + 身份冲突守卫 + 后端缺陷绕行）。
+// 合并同作用域重复候选（副本并集提交 + 管理员身份合并）。
 //
 // 取代此前三个按批次生成的合并脚本（merge_lossless_union / merge_expression_then_downstream /
 // merge_downstream_dups）——它们 80% 逻辑重复，且各自只认一类清单。
 //
 // 用法：
-//   node mf-merge.ts --from-report <gap-report.json> [--kinds expression,medium,track] [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]
+//   node mf-merge.ts --from-report <gap-report.json> [--kinds expression,medium,track] [--apply] [--sources <sources.json>]
 //   node mf-merge.ts --pairs <pairs.json>              # [{kind, keep, lose, scopeNote}]
-//   node mf-merge.ts --merge <keepId> <loseId> [--apply --sources <sources.json>]
+//   node mf-merge.ts --merge <keepId> <loseId> [--apply] [--sources <sources.json>]
 //
 // 默认 dry-run。**按依赖顺序**处理：expression → content_unit → medium → track
 //（track 的 400 duplicate_position 会随其 expression 归拢而消失）。
@@ -15,13 +15,13 @@
 // 铁律：
 //   · 身份冲突（同键异值的外部标识，或 duration/版次类属性不同）**一律拒绝合并**；
 //   · 作用域不同一律拒绝（work 之外的结构实体必须同归属）；
-//   · 遇 status=merged 直接跳过（幂等），不重复提交。
+//   · 遇 state=merged 直接跳过（幂等），不重复提交。
 
 import { auditOutputDirectory } from "./mf-output.ts";
 import fs from "node:fs";
 import { dirname } from "node:path";
 import {
-  KINDS, getEntityRetry, identityConflicts, mergeEntity, pickKeeper, scopeKey, sleep,
+  getEntityRetry, identityConflicts, mergeEntity, pickKeeper, scopeKey, sleep,
 } from "./mf-lib.ts";
 
 const argv = process.argv.slice(2);
@@ -31,19 +31,35 @@ const opt = (name, fallback = null) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
 
+const usage = [
+  "用法：node mf-merge.ts --from-report <report.json> [--kinds a,b] [--apply] [--sources <sources.json>]",
+  "      node mf-merge.ts --pairs <pairs.json> [--apply] [--sources <sources.json>]",
+  "      node mf-merge.ts --merge <keepId>,<loseId> [--scope <说明>] [--apply] [--sources <sources.json>]",
+  "默认只读预览；--apply 先提交副本并 push，已合入后执行独立管理员身份合并。",
+].join("\n");
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(usage);
+  process.exit(0);
+}
+const values = new Set(["--from-report", "--pairs", "--merge", "--scope", "--kinds", "--sources"]);
+for (let index = 0; index < argv.length; index++) {
+  const name = argv[index];
+  if (name === "--apply") continue;
+  if (!values.has(name)) throw new Error(`unknown_argument:${name}`);
+  if (!argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error(`argument_required:${name}`);
+  index++;
+  if (name === "--merge" && !argv[index].includes(",") && argv[index + 1] && !argv[index + 1].startsWith("--")) index++;
+}
+if (["--from-report", "--pairs", "--merge"].filter((mode) => argv.includes(mode)).length !== 1)
+  throw new Error("choose_one_merge_mode");
+
 const APPLY = flag("--apply");
 const REPORT = opt("--from-report");
 const PAIRS = opt("--pairs");
 const MERGE = opt("--merge");
 const SOURCES_FILE = opt("--sources");
 const mergeSources = SOURCES_FILE ? JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8")) : [];
-const REVIEWS_FILE = opt("--reviews");
-const mergeReviews = REVIEWS_FILE ? JSON.parse(fs.readFileSync(REVIEWS_FILE, "utf8")) : {};
-if (!mergeReviews || typeof mergeReviews !== "object" || Array.isArray(mergeReviews))
-  throw new Error("--reviews 必须是按 entity:<保留方UUID> 提供已审查 canonical ID 数组的对象");
-if (APPLY && (!Array.isArray(mergeSources) || mergeSources.length === 0)) {
-  throw new Error("--apply 必须通过 --sources <sources.json> 提供已核验的真实来源；不能仅凭审计重复候选或 self 合并");
-}
+if (!Array.isArray(mergeSources)) throw new Error("invalid_sources");
 // 依赖顺序：先表达，再篇章/载体/曲目
 const ORDER = ["expression", "content_unit", "medium", "track", "work", "release", "collection", "agent"];
 
@@ -60,7 +76,7 @@ async function handlePair(kind, keepId, loseId, scopeNote) {
   const lose = await getEntityRetry(loseId);
   if (!keep || !lose) { skipped += 1; log.push({ kind, keepId, loseId, result: "skip: 实体不存在" }); return; }
   if (keep.state === "merged" || lose.state === "merged") { skipped += 1; log.push({ kind, keepId, loseId, result: "skip: 已合并（幂等）" }); return; }
-  if (keep.state !== "active") { skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 保留方 status=${keep.state}（须 active）` }); return; }
+  if (keep.state !== "active") { skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 保留方 state=${keep.state}（须 active）` }); return; }
 
   const note = scopeNote ?? `${kind} 同作用域`;
   if (kind !== "work" && kind !== "agent" && kind !== "collection") {
@@ -73,8 +89,7 @@ async function handlePair(kind, keepId, loseId, scopeNote) {
     skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 身份冲突 ${conflicts.join(",")}`, conflicts }); return;
   }
 
-  const r = await mergeEntity({ kind, keep, lose, scopeNote: note, dryRun: !APPLY, sources: mergeSources,
-    reviewedCandidateIDs: mergeReviews[`entity:${keepId}`] ?? [] });
+  const r = await mergeEntity({ kind, keep, lose, scopeNote: note, dryRun: !APPLY, sources: mergeSources });
   if (r.ok) {
     if (r.reason === "merged") merged += 1; else skipped += 1;
     log.push({ kind, keepId, loseId, result: r.reason, ...r });
@@ -124,10 +139,7 @@ if (MERGE) {
     }
   }
 } else {
-  console.error("用法：node mf-merge.ts --from-report <gap-report.json> [--kinds a,b] [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]");
-  console.error("      node mf-merge.ts --pairs <pairs.json> [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]");
-  console.error("      node mf-merge.ts --merge <keepId>,<loseId> [--apply --sources <sources.json>] [--reviews <identity-reviews.json>]");
-  process.exit(2);
+  throw new Error("choose_one_merge_mode");
 }
 
 console.log(`=== ${APPLY ? "APPLY" : "DRY-RUN"} === merged=${merged} skipped=${skipped} failed=${failed}`);

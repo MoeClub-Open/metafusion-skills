@@ -15,13 +15,54 @@ export interface CatalogEntity {
   version: number;
   redirect_id?: string;
 }
-export interface CommitReceipt {
+export interface WorkspaceObject {
+  target: "entity" | "relation";
   id: string;
+  base_version: number;
+  base: JsonObject | null;
+  committed: JsonObject | null;
+  document: JsonObject | null;
+  dirty: boolean;
+}
+export interface CatalogWorkspace {
+  id: string;
+  owner_id: string;
+  name: string;
+  version: number;
+  head_commit_id: string | null;
+  state: string;
+  members: string[];
+  objects: WorkspaceObject[];
+  dirty_count: number;
+}
+export interface CollaborationCommit {
+  id: string;
+  workspace_id: string | null;
+  parent_id: string | null;
+  author: { id: string; name: string };
+  authors: Array<{ id: string; name: string }>;
+  message: string;
+  kind: string;
+  created_at: string;
+  merged_at: string | null;
+  merged_by: string | null;
+  pull_request_id: string | null;
+  changes: Array<{ target: "entity" | "relation"; id: string; base_version: number; base: JsonObject | null; before: JsonObject | null; after: JsonObject | null }>;
+}
+export interface WorkspacePushResult {
   applied: boolean;
-  review_status: "pending_review" | "reviewed";
-  review_decision: "pending" | "approved" | "rejected" | "exempt";
-  refs: Record<string, string>;
-  items: Array<{ target: "entity" | "relation"; id: string; version: number; changed: boolean; merged: boolean }>;
+  workspace: CatalogWorkspace | null;
+  commits: CollaborationCommit[];
+  pull_request: JsonObject | null;
+}
+export interface WorkspaceOperation {
+  target: "entity" | "relation";
+  action: "create" | "update" | "delete" | "content";
+  id?: string;
+  ref?: string;
+  document?: JsonObject;
+  patch?: Array<{ path: string; value?: unknown; remove?: boolean }>;
+  content_change?: JsonObject;
 }
 export interface RequestOptions {
   method?: string;
@@ -139,11 +180,14 @@ export function publicFailure(response) {
     401: ["invalid_token", "authentication_required"],
     403: ["forbidden"],
     409: [
-      "commit_conflict",
       "definitions_conflict",
       "idempotency_conflict",
       "version_conflict",
-      "identity_candidates_changed",
+      "workspace_conflict",
+      "workspace_version_conflict",
+      "workspace_head_conflict",
+      "pull_request_version_conflict",
+      "pull_request_head_conflict",
     ],
     429: ["rate_limited"],
     500: ["internal_error", "database_error"],
@@ -157,34 +201,11 @@ export function publicFailure(response) {
       /^[a-z][a-z0-9_]{0,80}$/.test(code) &&
       !code.startsWith("mfp_"));
   const out: JsonObject = { error: valid ? code : `http_${response?.status ?? 0}` };
-  const c = response?.body?.conflict;
-  if (
-    out.error === "commit_conflict" &&
-    c &&
-    typeof c.id === "string" &&
-    Number.isSafeInteger(c.operation) &&
-    Number.isSafeInteger(c.base_version) &&
-    Number.isSafeInteger(c.current_version) &&
-    Array.isArray(c.paths) &&
-    c.paths.every((p) => typeof p === "string" && p.startsWith("/"))
-  )
-    out.conflict = {
-      operation: c.operation,
-      id: c.id,
-      base_version: c.base_version,
-      current_version: c.current_version,
-      paths: c.paths,
-    };
-  const identity = response?.body?.identity_review;
-  if (
-    out.error === "identity_candidates_changed" &&
-    Number.isSafeInteger(identity?.operation) &&
-    Array.isArray(identity.candidate_ids) &&
-    identity.candidate_ids.every(
-      (x) => typeof x === "string" && /^[0-9a-f-]{36}$/.test(x),
-    )
-  )
-    out.identity_review = identity;
+  if (out.error === "workspace_conflict" && Array.isArray(response?.body?.conflicts))
+    out.conflicts = response.body.conflicts.filter((conflict) => conflict && typeof conflict === "object").map((conflict) => Object.fromEntries(
+      ["target", "id", "base_version", "current_version", "pointer", "base", "current", "proposed", "remove", "kind"]
+        .filter((key) => Object.hasOwn(conflict, key)).map((key) => [key, conflict[key]]),
+    ));
   return out;
 }
 
