@@ -105,12 +105,12 @@ POST /api/catalog/workspaces/{id}/rebase
   "expected_head":"22222222-2222-4222-8222-222222222222",
   "message":"合并并发题名修改",
   "resolutions":[
-    {"target":"entity","id":"11111111-1111-4111-8111-111111111111","pointer":"/title","current_version":8,"value":"合并后的题名"}
+    {"commit_id":"22222222-2222-4222-8222-222222222222","target":"entity","id":"11111111-1111-4111-8111-111111111111","pointer":"/title","current_version":8,"value":"合并后的题名"}
   ]
 }
 ```
 
-删除路径传 remove=true，不能同时带 value。pointer 原样使用冲突响应中的值；整对象级冲突不能随意当作单字段处理。本地 `rebase --file resolutions.json` 接收 resolutions 数组。rebase 生成新提交而不改变正式目录，随后重新 push。
+删除路径传 remove=true，不能同时带 value。pointer 原样使用冲突响应中的值；整对象级冲突不能随意当作单字段处理。本地 `rebase --file rebase.json` 接收原生请求对象（含 resolutions），version/head 由已读取的副本固定；commit_id 取重放冲突的 source_commit_id，后续冲突保留先前解决项。rebase 生成新提交而不改变正式目录，随后重新 push。
 
 ## 模型 DTO
 

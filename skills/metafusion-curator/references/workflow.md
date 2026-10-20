@@ -34,8 +34,14 @@ node mf-workspace.ts push --dir TASK_DIR
 
 每次改变副本带 `expected_version`，push/rebase 另带 `expected_head`；PR merge 带 PR 的 version 与 head。工具保存并提交读取时的版本，CAS 冲突后先重新读取，不用新版本号盲目重放旧编辑。
 
-合并比较共同基线、当前正式目录和副本已提交内容。不同字段的修改可自动合并；同字段不同值返回冲突，数组按完整值处理。撤销回基线的内容不会再次覆盖正式目录。
+合并比较共同基线、当前正式目录和副本已提交内容。不同字段的修改可自动合并；不相交的正文行也自动合并；重叠修改返回冲突，数组按完整值处理。撤销回基线的内容不会再次覆盖正式目录。
 
-`workspace_conflict` 的每项包含 target、id、pointer、base、current、proposed 和 current_version。核对双方意图后，用 `rebase --file resolutions.json` 提交每项的明确值或 remove；同时固定 expected_version/head，生成新提交，旧提交保留。若正式目录再次变化，重新获取冲突，不沿用过时的 current_version。resolution 形状见[载荷](api-templates.md#冲突解决)。
+`workspace_conflict` 的每项包含 target、id、pointer、base、current、proposed 和 current_version。核对双方意图后，用 `rebase --file rebase.json` 传原生请求对象（含 resolutions）；每项传明确值或 remove，commit_id 原样取冲突的 source_commit_id，后一步冲突时保留先前解决项；同时固定 expected_version/head，生成新提交，旧提交保留。若正式目录再次变化，重新获取冲突，不沿用过时的 current_version。resolution 形状见[载荷](api-templates.md#冲突解决)。
 
 网络失败不能证明操作未执行。保留本地状态、workspace_id、commit ID 与 PR ID，通过 status、`receipt --commit UUID` 和 pr-get 确定实际结果；不把未知结果当作需要新建提交。遵守 `Retry-After`，不自动增加并发绕过限流。仅在结果明确且无恢复需要后清理本任务的本地文件。
+
+## 分支与历史
+
+`fork --dir NEW_DIR --commit UUID` 从冻结提交派生；正式目录检查点用 `--entity/--relation` 选择记录。`version --file action.json` 转发原生 operation：merge、cherry_pick、revert、restore、amend、squash、reset、discard。`rebase --onto UUID --file rebase.json` 逐个重放待合入编辑；对象中的 order 可重排、筛选，[] 丢弃全部。所有改写保留原提交、原作者及替代关系，仍需 push 才生效。
+
+`tag/stash --file action.json` 管理标签、搁置；events/tags/stashes/commits 读取分页历史。snapshot/compare/blame 读取冻结记录、版本差异及字段归属；compare 带 --commit HEAD --base BASE。原生载荷与 scope 的含义以 [API 文档](https://github.com/MoeclubM/metafusion-docs/blob/main/docs/api-commits.md) 为准，单页不能视为完整历史。请求 ID、version/head 由本地状态固定，未知结果先读 receipt/status，不换 ID 重交。

@@ -25,6 +25,8 @@ export interface WorkspaceObject {
   dirty: boolean;
 }
 export interface CatalogWorkspace {
+	base_commit_id: string | null;
+	pending_commits: number;
   id: string;
   owner_id: string;
   name: string;
@@ -36,10 +38,16 @@ export interface CatalogWorkspace {
   dirty_count: number;
 }
 export interface CollaborationCommit {
+	merge_parent_id: string | null;
+	operation: string;
+	source_ids: string[];
+	replaced_by: string[];
+	snapshot_scope: "catalog" | "tracked_records" | "known_records";
   id: string;
   workspace_id: string | null;
   parent_id: string | null;
   author: { id: string; name: string };
+  committer: { id: string; name: string };
   authors: Array<{ id: string; name: string }>;
   message: string;
   kind: string;

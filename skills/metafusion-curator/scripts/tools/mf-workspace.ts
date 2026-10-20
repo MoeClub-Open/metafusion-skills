@@ -143,6 +143,12 @@ interface WorkspaceState {
   pending?: { kind: string; pathname: string; body: Record<string, any>; method: string };
 }
 interface WorkspaceOptions {
+  ontoID?: string;
+	baseID?: string;
+	requestID?: string;
+	target?: string;
+	recordID?: string;
+	pointer?: string;
   dir?: string;
   origin?: string;
   requestFn?: RequestFn;
@@ -215,16 +221,23 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
   const lock = fs.openSync(lockFile, "wx", 0o600);
   fs.writeFileSync(lock, String(process.pid));
   try {
-    if (command === "init") {
+    if (command === "init" || command === "fork") {
       if (fs.existsSync(stateFile)) throw new Error("workspace_already_initialized");
-      const response = options.workspaceID
+      const pendingFile=path.join(directory,".mf-workspace-init.json");
+      const initial=command==="fork"?{name:options.name??"",commit_id:options.commitID,entity_ids:entityIDs,relation_ids:relationIDs}:{name:options.name??"",entity_ids:entityIDs,relation_ids:relationIDs};
+      if(command==="fork"&&!options.commitID)throw new Error("commit_id_required");
+      let creation: {origin:string;command:string;initial:typeof initial;body:Record<string,unknown>};
+      if(fs.existsSync(pendingFile)){creation=read(pendingFile);if(creation.origin!==origin||creation.command!==command||!same(creation.initial,initial))throw new Error("creation_result_unknown_keep_original_request");}
+      else {creation={origin,command,initial,body:{...initial,id:options.requestID??randomUUID()}};if(!options.workspaceID||command==="fork")save(pendingFile,creation);}
+      const response = options.workspaceID&&command==="init"
         ? await send(`${API}/workspaces/${encoded(options.workspaceID)}`)
-        : await send(`${API}/workspaces`, "POST", { name: options.name ?? "", entity_ids: entityIDs, relation_ids: relationIDs });
+        : await send(`${API}/workspaces${command==="fork"?"/fork":""}`, "POST", creation.body);
       if (![200, 201].includes(response.status) || !isWorkspace(response.body)) {
         return { ok: false, status: response.status, result: publicFailure(response),
-          ...(response.status === 0 || response.status >= 500 ? { reason: "create_result_unknown_list_workspaces_before_retry" } : {}) };
+          ...(response.status === 0 || response.status >= 500 ? { reason: "creation_result_unknown_keep_original_request",request:creation.body } : {}) };
       }
       save(stateFile, { origin, workspace: response.body });
+      if(fs.existsSync(pendingFile))fs.unlinkSync(pendingFile);
       return { ok: true, workspace: response.body };
     }
     const state = read(stateFile) as WorkspaceState;
@@ -244,14 +257,24 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
       if (!await refresh()) return { ok: false, reason: "workspace_read_failed" };
       return { ok: true, workspace: state.workspace, ...(state.pending ? { unknown_request: state.pending } : {}) };
     }
-    if (command === "commits") return responseResult(await send(`${workspacePath}/commits`));
+    if (["commits","events","tags","stashes","merge-status"].includes(command)) {
+      const query=new URLSearchParams();if(options.limit!==undefined)query.set("limit",String(options.limit));if(options.offset!==undefined)query.set("offset",String(options.offset));
+      return responseResult(await send(`${workspacePath}/${command==="merge-status"?"status":command}${query.size?`?${query}`:""}`));
+    }
+    if (["snapshot","compare","blame"].includes(command)) {
+      const commit=options.commitID??state.workspace.head_commit_id;if(!commit)throw new Error("commit_id_required");const query=new URLSearchParams();
+      if(options.limit!==undefined)query.set("limit",String(options.limit));if(options.offset!==undefined)query.set("offset",String(options.offset));
+      if(command==="compare"){if(!options.baseID)throw new Error("base_commit_required");query.set("base",options.baseID)}
+      if(command==="blame"){if(!options.target||!options.recordID||!options.pointer)throw new Error("field_path_required");query.set("target",options.target);query.set("record_id",options.recordID);query.set("pointer",options.pointer)}
+      return responseResult(await send(`${API}/commits/${encoded(commit)}/${command}${query.size?`?${query}`:""}`));
+    }
     if (command === "receipt") {
       const id = options.commitID ?? state.pending?.body.id ?? state.workspace.head_commit_id;
       if (!id) throw new Error("commit_id_required");
       const response = await send(`${API}/commits/${encoded(id)}`);
       if (response.status === 200 && response.body?.id === id) {
         const pending = state.pending;
-        if (pending && ["commit", "rebase"].includes(pending.kind) && pending.body.id === id) {
+        if (pending && ["commit", "rebase","version"].includes(pending.kind) && pending.body.id === id) {
           delete state.pending;
           save(stateFile, state);
         }
@@ -270,6 +293,13 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
     const expected = { expected_version: state.workspace.version };
     const head = { ...expected, expected_head: state.workspace.head_commit_id ?? "" };
     switch (command) {
+      case "version":
+      case "tag":
+      case "stash": {
+        const payload=options.edit??input(options);if(!record(payload))throw new Error("version_payload_required");
+        pathname+=command==="version"?"/version":command==="tag"?"/tags":"/stashes";
+        body={...payload,...head,id:payload.id??options.requestID??randomUUID()};break;
+      }
       case "checkout":
         pathname += "/checkout";
         body = { ...expected, entity_ids: entityIDs, relation_ids: relationIDs };
@@ -303,11 +333,13 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
         pathname += "/push";
         body = { ...head, ...(options.title ? { title: options.title } : {}) };
         break;
-      case "rebase":
+      case "rebase": {
         pathname += "/rebase";
-        body = { ...head, id: options.commitID ?? randomUUID(), ...(options.message ? { message: options.message } : {}),
-          resolutions: options.resolutions ?? input(options) ?? [] };
+        const payload = options.edit ?? input(options) ?? {};
+        if (!record(payload)) throw new Error("rebase_payload_required");
+        body = { ...payload, ...head, id: payload.id ?? options.commitID ?? randomUUID(), ...(options.message ? { message: options.message } : {}), ...(options.ontoID ? { onto_commit_id: options.ontoID } : {}) };
         break;
+      }
       case "pr-create":
         pathname = `${API}/pull-requests`;
         body = { ...head, workspace_id: state.workspace.id, title: options.title ?? state.workspace.name };
@@ -364,18 +396,23 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
 export async function runCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || command === "help") {
-    console.log("mf-workspace init|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
+    console.log("mf-workspace init|fork|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|version|tag|tags|stash|stashes|events|merge-status|snapshot|compare|blame|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
       + "--dir DIR holds the last observed server workspace, version and head; never credentials.\n"
       + "init: [--name NAME] [--entity UUID] [--relation UUID], or --workspace UUID to attach.\n"
       + "checkout: --entity UUID / --relation UUID (repeatable). stage: --file operations.json.\n"
       + "commit: --message TEXT [--commit UUID]. push: [--title TEXT].\n"
-      + "rebase: [--file resolutions.json] [--message TEXT] [--commit UUID]. receipt: [--commit UUID].\n"
+      + "rebase: [--onto UUID] [--file native-rebase.json] [--message TEXT] [--commit UUID]. receipt: [--commit UUID].\n"
+      + "fork: --dir NEW_DIR --commit UUID [--name NAME] [--entity UUID / --relation UUID].\n"
+      + "version|tag|stash: --file native-action.json [--request UUID]. Version/head come from the saved observed copy.\n"
+      + "snapshot: [--commit UUID]. compare: --commit UUID --base UUID. blame: --commit UUID --target entity|relation --record UUID --pointer /field.\n"
+      + "commits|events|tags|stashes|snapshot|compare: [--limit N --offset N].\n"
       + "members: --file userids.json. edit: --file patch.json. pr-get/pr-edit/pr-merge: --pr UUID.\n"
       + "pr-create: [--title TEXT]. pr-edit: --file patch.json. Unknown outcomes retain the exact request; inspect receipt/status before retry.");
     return;
   }
   const options: WorkspaceOptions = { entityIDs: [], relationIDs: [] };
   const fields: Record<string, keyof WorkspaceOptions> = { "--dir": "dir", "--workspace": "workspaceID", "--name": "name",
+    "--base":"baseID","--onto":"ontoID","--request":"requestID","--target":"target","--record":"recordID","--pointer":"pointer",
     "--message": "message", "--title": "title", "--commit": "commitID", "--pr": "pullRequestID", "--file": "file", "--status": "status" };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i], value = args[++i];

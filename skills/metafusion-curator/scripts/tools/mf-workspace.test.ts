@@ -84,6 +84,23 @@ async function prepared(t) {
   assert.equal((await runWorkspace("checkout", { ...f.options, entityIDs: [entityID] })).ok, true);
   return f;
 }
+
+test("native rebase preserves an explicit empty replay order and the observed CAS guards", async (t) => {
+  const f = await prepared(t);
+  const id="30000000-0000-0000-0000-000000000001";
+  let body: any;
+  const result=await runWorkspace("rebase",{...f.options,commitID:id,edit:{onto_commit_id:entityID,order:[]},requestFn:async(pathname,options:any)=>{
+    if(!pathname.endsWith("/rebase"))return f.requestFn(pathname,options);
+    body=options.body;
+    return {status:200,body:{workspace:{...f.workspace,version:f.workspace.version+1,head_commit_id:id},commit:{id}}};
+  }});
+  assert.equal(result.ok,true);
+  assert.deepEqual(body.order,[]);
+  assert.equal(body.onto_commit_id,entityID);
+  assert.equal(body.expected_version,f.workspace.version);
+  assert.equal(body.expected_head,"");
+  assert.equal(body.id,id);
+});
 const operation = (title) => [{ target: "entity" as const, action: "update" as const, id: entityID, patch: [{ path: "/title", value: title }] }];
 
 test("multiple server stages and immutable commits leave main unchanged until push", async (t) => {

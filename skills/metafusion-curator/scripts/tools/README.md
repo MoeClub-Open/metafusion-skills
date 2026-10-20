@@ -6,7 +6,7 @@
 | --- | --- |
 | 外部资料与官方商品页 | `mf-source`；[支持范围](README-providers.md) |
 | 只读目录和当前修订 | `mf-platform` |
-| 服务器副本、暂存、提交、推送、PR 和冲突 | `mf-workspace` |
+| 副本派生、暂存/提交、合并/变基、撤销/恢复、标签/stash、PR 与历史 | `mf-workspace` |
 | 在副本中暂存单条 Track 收录 | `mf-track-content`，执行仅 stage，随后仍需 commit/push |
 | 词项 upsert 与受控字段新增 | `mf-definitions` |
 | 查重候选与目录快照 | `mf-find-identity`、`mf-catalog-snapshot` |
