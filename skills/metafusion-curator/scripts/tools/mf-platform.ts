@@ -164,7 +164,7 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
     if (current.status !== 200) return failure(current);
     if (!entity(current.body, plan.id))
       return { ok: false, outcome: "partial", reason: "entity_shape_invalid" };
-    const history = await read(requestFn, entityPath(plan.id, "/revisions"));
+    const history = await read(requestFn, entityPath(plan.id, `/revisions?version=${current.body.version}&limit=1`));
     if (history.status !== 200) return failure(history);
     const candidates = history.body?.items?.filter(
       (x) => x.version === current.body.version,

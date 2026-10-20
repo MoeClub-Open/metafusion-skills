@@ -143,6 +143,12 @@ interface WorkspaceState {
   pending?: { kind: string; pathname: string; body: Record<string, any>; method: string };
 }
 interface WorkspaceOptions {
+  authorID?: string;
+  since?: string;
+  until?: string;
+  state?: string;
+  basis?: string;
+  version?: number;
   ontoID?: string;
 	baseID?: string;
 	requestID?: string;
@@ -185,6 +191,34 @@ function input(options: WorkspaceOptions) {
   return options.file ? read(options.file) : undefined;
 }
 const encoded = (id: string) => encodeURIComponent(id);
+function readQuery(options: WorkspaceOptions, mode: "page" | "records" | "history" | "branch" | "revisions" = "page") {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) {
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 100) throw new Error("invalid_limit");
+    query.set("limit", String(options.limit));
+  }
+  if (options.offset !== undefined) {
+    if (!Number.isSafeInteger(options.offset) || options.offset < 0) throw new Error("invalid_offset");
+    query.set("offset", String(options.offset));
+  }
+  if (["records", "history", "branch"].includes(mode)) {
+    if (options.target) query.set("target", options.target);
+    if (options.recordID) query.set("record_id", options.recordID);
+  }
+  if (["history", "branch", "revisions"].includes(mode)) {
+    if (options.authorID) query.set("author_id", options.authorID);
+    if (options.since) query.set("since", options.since);
+    if (options.until) query.set("until", options.until);
+  }
+  if (mode === "branch" && options.state) query.set("state", options.state);
+  if (mode === "revisions" && options.version !== undefined) {
+    if (!Number.isSafeInteger(options.version) || options.version < 1) throw new Error("invalid_version");
+    query.set("version", String(options.version));
+  }
+  return query;
+}
+const queryPath = (pathname: string, query: URLSearchParams) => `${pathname}${query.size ? `?${query}` : ""}`;
+
 
 /** The local file holds only the last observed server version, never a second
  *  branch implementation. All staged objects and immutable commits live on the
@@ -197,20 +231,41 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
     catch { return { status: 0, body: {} }; }
   };
   if (command === "list" || command === "pr-list") {
-    const query = new URLSearchParams();
-    if (options.limit !== undefined) {
-      if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100) throw new Error("invalid_limit");
-      query.set("limit", String(options.limit));
-    }
-    if (options.offset !== undefined) {
-      if (!Number.isInteger(options.offset) || options.offset < 0) throw new Error("invalid_offset");
-      query.set("offset", String(options.offset));
-    }
+    const query = readQuery(options);
     if (command === "pr-list") {
       if (options.workspaceID) query.set("workspace_id", options.workspaceID);
       if (options.status) query.set("status", options.status);
     }
     const response = await send(`${API}/${command === "list" ? "workspaces" : "pull-requests"}${query.size ? `?${query}` : ""}`);
+    return { ok: response.status === 200, status: response.status, result: response.status === 200 ? response.body : publicFailure(response) };
+  }
+  const independent = ["head", "history", "commit-diff", "pr-diff", "pr-commits", "revisions", "pr-get"].includes(command)
+    || (["snapshot", "compare", "blame"].includes(command) && (!!options.commitID || !options.dir));
+  if (independent) {
+    let pathname: string;
+    let query = readQuery(options, command === "history" || command === "pr-commits" ? "history" : command === "revisions" ? "revisions" : "records");
+    if (command === "head") { pathname = `${API}/head`; query = new URLSearchParams(); }
+    else if (command === "history") pathname = `${API}/history`;
+    else if (command.startsWith("pr-")) {
+      if (!options.pullRequestID) throw new Error("pull_request_id_required");
+      if (command === "pr-get") query = new URLSearchParams();
+      pathname = `${API}/pull-requests/${encoded(options.pullRequestID)}${command === "pr-get" ? "" : command === "pr-diff" ? "/diff" : "/commits"}`;
+    } else if (command === "revisions") {
+      if (!options.recordID) throw new Error("record_id_required");
+      pathname = `${API}/entities/${encoded(options.recordID)}/revisions`;
+    } else {
+      if (!options.commitID) throw new Error("commit_id_required");
+      pathname = `${API}/commits/${encoded(options.commitID)}/${command === "commit-diff" ? "diff" : command}`;
+      if (command === "compare") {
+        if (!options.baseID) throw new Error("base_commit_required");
+        query.set("base", options.baseID);
+      }
+      if (command === "blame") {
+        if (!options.target || !options.recordID || !options.pointer) throw new Error("field_path_required");
+        query.set("pointer", options.pointer);
+      }
+    }
+    const response = await send(queryPath(pathname, query));
     return { ok: response.status === 200, status: response.status, result: response.status === 200 ? response.body : publicFailure(response) };
   }
   if (!options.dir) throw new Error("workspace_directory_required");
@@ -257,13 +312,14 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
       if (!await refresh()) return { ok: false, reason: "workspace_read_failed" };
       return { ok: true, workspace: state.workspace, ...(state.pending ? { unknown_request: state.pending } : {}) };
     }
-    if (["commits","events","tags","stashes","merge-status"].includes(command)) {
-      const query=new URLSearchParams();if(options.limit!==undefined)query.set("limit",String(options.limit));if(options.offset!==undefined)query.set("offset",String(options.offset));
+    if (["commits","events","tags","stashes","merge-status","diff"].includes(command)) {
+      const query = readQuery(options, command === "commits" ? "branch" : command === "diff" ? "records" : "page");
+      if (command === "diff" && options.basis) query.set("basis", options.basis);
       return responseResult(await send(`${workspacePath}/${command==="merge-status"?"status":command}${query.size?`?${query}`:""}`));
     }
     if (["snapshot","compare","blame"].includes(command)) {
       const commit=options.commitID??state.workspace.head_commit_id;if(!commit)throw new Error("commit_id_required");const query=new URLSearchParams();
-      if(options.limit!==undefined)query.set("limit",String(options.limit));if(options.offset!==undefined)query.set("offset",String(options.offset));
+      for (const [key, value] of readQuery(options, "records")) query.set(key, value);
       if(command==="compare"){if(!options.baseID)throw new Error("base_commit_required");query.set("base",options.baseID)}
       if(command==="blame"){if(!options.target||!options.recordID||!options.pointer)throw new Error("field_path_required");query.set("target",options.target);query.set("record_id",options.recordID);query.set("pointer",options.pointer)}
       return responseResult(await send(`${API}/commits/${encoded(commit)}/${command}${query.size?`?${query}`:""}`));
@@ -283,10 +339,6 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
           ...(state.pending ? { unknown_request: state.pending } : {}) };
       }
       return { ...responseResult(response), reason: "commit_result_not_confirmed_keep_id" };
-    }
-    if (command === "pr-get") {
-      if (!options.pullRequestID) throw new Error("pull_request_id_required");
-      return responseResult(await send(`${API}/pull-requests/${encoded(options.pullRequestID)}`));
     }
     if (state.pending && command !== "retry") throw new Error("request_result_unknown_read_receipt_or_retry_same_request");
     let pathname = workspacePath, method = "POST", body: Record<string, any>;
@@ -396,7 +448,7 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
 export async function runCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || command === "help") {
-    console.log("mf-workspace init|fork|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|version|tag|tags|stash|stashes|events|merge-status|snapshot|compare|blame|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
+    console.log("mf-workspace head|history|revisions|diff|commit-diff|pr-diff|pr-commits|init|fork|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|version|tag|tags|stash|stashes|events|merge-status|snapshot|compare|blame|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
       + "--dir DIR holds the last observed server workspace, version and head; never credentials.\n"
       + "init: [--name NAME] [--entity UUID] [--relation UUID], or --workspace UUID to attach.\n"
       + "checkout: --entity UUID / --relation UUID (repeatable). stage: --file operations.json.\n"
@@ -404,22 +456,23 @@ export async function runCli(argv = process.argv.slice(2)) {
       + "rebase: [--onto UUID] [--file native-rebase.json] [--message TEXT] [--commit UUID]. receipt: [--commit UUID].\n"
       + "fork: --dir NEW_DIR --commit UUID [--name NAME] [--entity UUID / --relation UUID].\n"
       + "version|tag|stash: --file native-action.json [--request UUID]. Version/head come from the saved observed copy.\n"
-      + "snapshot: [--commit UUID]. compare: --commit UUID --base UUID. blame: --commit UUID --target entity|relation --record UUID --pointer /field.\n"
-      + "commits|events|tags|stashes|snapshot|compare: [--limit N --offset N].\n"
+      + "head/history need no --dir. revisions: --record UUID [--version N]. diff: --dir DIR [--basis head|base].\n"
+      + "commit-diff/snapshot: --commit UUID (or snapshot uses saved head). pr-diff/pr-commits: --pr UUID. compare: --commit UUID --base UUID. blame: --commit UUID --target entity|relation --record UUID --pointer /field.\n"
+      + "Paged reads: [--limit N --offset N]. History/changes: [--target entity|relation --record UUID]; history: [--author UUID --since RFC3339 --until RFC3339]; commits: [--state active|pending|integrated|replaced|all].\n"
       + "members: --file userids.json. edit: --file patch.json. pr-get/pr-edit/pr-merge: --pr UUID.\n"
       + "pr-create: [--title TEXT]. pr-edit: --file patch.json. Unknown outcomes retain the exact request; inspect receipt/status before retry.");
     return;
   }
   const options: WorkspaceOptions = { entityIDs: [], relationIDs: [] };
   const fields: Record<string, keyof WorkspaceOptions> = { "--dir": "dir", "--workspace": "workspaceID", "--name": "name",
-    "--base":"baseID","--onto":"ontoID","--request":"requestID","--target":"target","--record":"recordID","--pointer":"pointer",
+    "--author":"authorID","--since":"since","--until":"until","--state":"state","--basis":"basis","--base":"baseID","--onto":"ontoID","--request":"requestID","--target":"target","--record":"recordID","--pointer":"pointer",
     "--message": "message", "--title": "title", "--commit": "commitID", "--pr": "pullRequestID", "--file": "file", "--status": "status" };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i], value = args[++i];
     if (!value || value.startsWith("--")) throw new Error(`missing_argument:${flag}`);
     if (flag === "--entity") options.entityIDs!.push(value);
     else if (flag === "--relation") options.relationIDs!.push(value);
-    else if (flag === "--limit" || flag === "--offset") options[flag === "--limit" ? "limit" : "offset"] = Number(value);
+    else if (["--limit", "--offset", "--version"].includes(flag)) options[flag.slice(2) as "limit" | "offset" | "version"] = Number(value);
     else if (fields[flag]) (options as Record<string, unknown>)[fields[flag]] = value;
     else throw new Error(`unknown_argument:${flag}`);
   }

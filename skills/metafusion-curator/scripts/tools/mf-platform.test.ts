@@ -120,7 +120,7 @@ test("revision is selected by entity version, not list position", async () => {
     {
       requestFn: async (p) => ({
         status: 200,
-        body: p.endsWith("revisions")
+        body: p.endsWith("/revisions?version=2&limit=1")
           ? {
               items: [
                 { id: 5, version: 1, snapshot: { ...entity, version: 1 } },

@@ -16,6 +16,8 @@
 | --- | --- |
 | 创建、列出和读取副本 | `metafusion_workspace_create`、`metafusion_workspace_list`、`metafusion_workspace_get` |
 | 加入正式目录对象、暂存修改 | `metafusion_workspace_checkout`、`metafusion_workspace_stage` |
+| 工作与冻结提案差异 | `metafusion_workspace_diff`、`metafusion_commit_diff`、`metafusion_pull_request_diff`、`metafusion_pull_request_commits` |
+| 条目或关系修订 | `metafusion_record_revisions`，版本、作者与时间筛选，按 total/limit/offset 翻页 |
 | 提交、查看提交链 | `metafusion_workspace_commit`、`metafusion_workspace_commits`、`metafusion_commit_get` |
 | 推送与三方冲突解决 | `metafusion_workspace_push`、`metafusion_workspace_rebase` |
 | 成员与副本设置 | `metafusion_workspace_members`、`metafusion_workspace_edit` |

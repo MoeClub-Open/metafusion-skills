@@ -221,3 +221,30 @@ test("three-way merge ignores reverted local edits, merges independent paths, ex
   assert.deepEqual(rebasePatch({ title: "A", body: "a" }, { title: "B", body: "a" }, [{ path: "/body", value: "b" }]), { working: { title: "B", body: "b" }, conflicts: [] });
   assert.deepEqual(rebasePatch({ title: "A" }, { title: "B" }, [{ path: "/title", value: "C" }]).conflicts, ["/title"]);
 });
+
+
+test("version reads work without a local copy and preserve server filters", async () => {
+  const cases: [string, Record<string, any>, string][] = [
+    ["head", {}, "/api/catalog/head"],
+    ["history", {recordID:entityID, authorID:workspaceID, since:"2026-10-20T00:00:00Z", until:"2026-10-21T00:00:00Z", limit:1, offset:20}, `/api/catalog/history?limit=1&offset=20&record_id=${entityID}&author_id=${workspaceID}&since=2026-10-20T00%3A00%3A00Z&until=2026-10-21T00%3A00%3A00Z`],
+    ["snapshot", {commitID:workspaceID, target:"entity", recordID:entityID}, `/api/catalog/commits/${workspaceID}/snapshot?target=entity&record_id=${entityID}`],
+    ["commit-diff", {commitID:workspaceID, offset:20}, `/api/catalog/commits/${workspaceID}/diff?offset=20`],
+    ["pr-diff", {pullRequestID:workspaceID, target:"relation"}, `/api/catalog/pull-requests/${workspaceID}/diff?target=relation`],
+    ["pr-commits", {pullRequestID:workspaceID, authorID:entityID}, `/api/catalog/pull-requests/${workspaceID}/commits?author_id=${entityID}`],
+    ["revisions", {recordID:entityID, version:125}, `/api/catalog/entities/${entityID}/revisions?version=125`],
+  ];
+  for (const [command, options, expected] of cases) {
+    let calls = 0;
+    const result = await runWorkspace(command, {origin, ...options, requestFn: async (pathname, opts) => {
+      calls++;
+      assert.equal(pathname, expected);
+      assert.equal(opts?.method, "GET");
+      assert.equal(opts?.body, undefined);
+      return {status:200, body:{items:[], total:125, limit:1, offset:20}};
+    }});
+    assert.equal(result.ok, true);
+    assert.equal(result.result.total, 125);
+    assert.equal(calls, 1);
+  }
+  await assert.rejects(runWorkspace("history", {origin, limit:101}), /invalid_limit/);
+});

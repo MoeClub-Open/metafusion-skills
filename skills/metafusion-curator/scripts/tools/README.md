@@ -23,7 +23,10 @@ node mf-workspace.ts stage --dir TASK_DIR --file operations.json
 node mf-workspace.ts commit --dir TASK_DIR --message "修订题名与收录"
 node mf-workspace.ts push --dir TASK_DIR
 node mf-workspace.ts pr-list
-node mf-workspace.ts pr-get --dir TASK_DIR --pr PR_UUID
+node mf-workspace.ts pr-get --pr PR_UUID
+node mf-workspace.ts pr-diff --pr PR_UUID --target entity
+node mf-workspace.ts history --record ENTITY_UUID --limit 20
+node mf-workspace.ts revisions --record ENTITY_UUID --version 1
 ```
 
 init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本。本地目录只保存连接状态与已观察到的 version/head，所有工作内容和提交都存服务器。副本可多次 stage、commit，并通过 members 共同编辑；普通用户 push 发 PR，免审用户直接合入。未知结果保留状态并读取副本、commit 与 PR；详见[协作流程](../../references/workflow.md)。
