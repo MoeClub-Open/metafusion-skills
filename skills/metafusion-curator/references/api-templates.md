@@ -49,12 +49,15 @@ PUT /api/catalog/workspaces/{id}/changes
     }},
     {"target":"entity","action":"create","ref":"expression","document":{
       "kind":"expression","work_id":{"$ref":"work"},"title":"桜","original_language":"ja","translations":{"ja":{"title":"桜"}},"attributes":{}
+    }},
+    {"target":"relation","action":"create","ref":"edge","document":{
+      "type":"created_by","source_id":{"$ref":"work"},"target_id":"01a1...已有对象id","attributes":{}
     }}
   ]
 }
 ```
 
-名称仅为载荷示例，不构成真实编目。返回 `refs` 将本批 ref 映射到稳定 UUID；之后的 stage 和 commit 直接使用该 UUID。document 直接放 Entity 或 Relation，不包 entity/relation，不填写服务端 id、version、state 等字段。
+名称仅为载荷示例，不构成真实编目。返回 `refs` 将本批 ref 映射到稳定 UUID；之后的 stage 和 commit 直接使用该 UUID。关系的 `source_id`、`target_id` 同样可用 `{"$ref":"refname"}` 指向同批新建的实体，所以「新建人 + 挂署名边」在一个提交里就能完成，不必先推送再回读 ID。document 直接放 Entity 或 Relation，不包 entity/relation，不填写服务端 id、version、state 等字段。
 
 提交、推送：
 
