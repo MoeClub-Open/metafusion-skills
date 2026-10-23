@@ -36,7 +36,9 @@ PUT /api/catalog/workspaces/{id}/changes
 }
 ```
 
-示例字段需换成当前定义中实际存在的字段，删除路径也须对应实际事实。`patch` 使用 JSON Pointer；value 可以是 null，删除使用 remove。对象字段逐键处理，数组按完整值替换。`mf-workspace stage --file operations.json` 的文件内容只放上例 operations 数组。
+示例字段需换成当前定义中实际存在的字段，删除路径也须对应实际事实。`patch` 使用 JSON Pointer；value 可以是 null，删除使用 remove。对象字段逐键处理，数组按完整值替换。
+
+`mf-workspace stage --file operations.json` 的文件内容是**裸的 operations 数组**（`[{…},{…}]`，即上例 `operations` 键里那个数组本身），不要把 `expected_version` 外层对象一起写进去——整包会被拒绝为 `ok:false` / `operations_array_required`，且 `--file` 路径相对当前工作目录（写 `ws-x/operations.json`，不是 `operations.json`）。stage 可能以 0 退出却什么都没登记，所以接着要用 `status` 看 `objects` 与 `dirty_count` 确认，而不是只看返回里的 refs。
 
 新建多个关联对象时按依赖顺序声明 ref：
 
