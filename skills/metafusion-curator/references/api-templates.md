@@ -40,6 +40,8 @@ PUT /api/catalog/workspaces/{id}/changes
 
 `mf-workspace stage --file operations.json` 的文件内容是**裸的 operations 数组**（`[{…},{…}]`，即上例 `operations` 键里那个数组本身），不要把 `expected_version` 外层对象一起写进去——整包会被拒绝为 `ok:false` / `operations_array_required`，且 `--file` 路径相对当前工作目录（写 `ws-x/operations.json`，不是 `operations.json`）。stage 可能以 0 退出却什么都没登记，所以接着要用 `status` 看 `objects` 与 `dirty_count` 确认，而不是只看返回里的 refs。
 
+**每个 `action:"create"` 都必须带一个互不重复的 `ref`，关系边也一样**，即使没有任何操作引用它：服务端对全部 create 统一分配稳定 ID，缺 `ref` 会让整批返回 `400 invalid_local_reference`（外层仍是 `ok:false` 的 200/400 JSON，不是异常）。`$ref` 只能指向同一批里已声明的 ref 名，且该对象必须只有 `$ref` 一个键。
+
 新建多个关联对象时按依赖顺序声明 ref：
 
 ```json
