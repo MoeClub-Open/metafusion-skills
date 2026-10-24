@@ -63,7 +63,7 @@ const OPERATION_INPUTS = {
   "tmdb.tv": { argument: "1–12 位数字 TMDB TV ID；不接受详情 URL。", example: "mf-source run tmdb.tv 123", note: "读取需要配置 TMDB_API_KEY 或 TMDB_ACCESS_TOKEN。" },
   "tmdb.search": { argument: "非空电影检索词；此操作默认搜索 movie。", example: "mf-source run tmdb.search ExampleMovie", note: "读取需要配置 TMDB_API_KEY 或 TMDB_ACCESS_TOKEN。" },
   "anilist.media": { argument: "1–12 位数字 ID（裸 ID 默认 anime），或含 /anime/{id}/、/manga/{id}/ 的 AniList URL。", example: "mf-source run anilist.media 123" },
-  "anilist.search": { argument: "非空 AniList media 检索词；--type ANIME（默认）或 MANGA（漫画/轻小说）。", example: "mf-source run anilist.search Frieren --type MANGA" },
+  "anilist.search": { argument: "非空 AniList media 检索词；--type ANIME（默认）或 MANGA（漫画/轻小说）。", example: "mf-source run anilist.search Frieren", note: "漫画/轻小说检索在命令末尾加 --type MANGA。" },
   "mal.anime": { argument: "1–12 位数字 MAL ID（裸 ID 默认 anime），或 myanimelist.net/anime/{id} 页面 URL。", example: "mf-source run mal.anime 123", note: "读取需要配置 MAL_CLIENT_ID。" },
   "mal.search": { argument: "非空 MyAnimeList 检索词。", example: "mf-source run mal.search Frieren", note: "读取需要配置 MAL_CLIENT_ID。" },
   "isni.record": { argument: "16 位 ISNI（前 15 位数字，末位数字或 X）；可带空格/连字符或 <ISNI> 包装。", example: "mf-source run isni.record 0000000000000001", note: "该读取入口检查形状，不执行 MOD 11-2 校验位核验。" },
