@@ -209,6 +209,13 @@ export function publicFailure(response) {
       /^[a-z][a-z0-9_]{0,80}$/.test(code) &&
       !code.startsWith("mfp_"));
   const out: JsonObject = { error: valid ? code : `http_${response?.status ?? 0}` };
+  if (valid && response.status === 400) {
+    if (Number.isSafeInteger(response.body.operation) && response.body.operation >= 0)
+      out.operation = response.body.operation;
+    if (typeof response.body.pointer === "string" && (response.body.pointer === "" || response.body.pointer.startsWith("/")))
+      out.pointer = response.body.pointer;
+    if (response.body.applied === false) out.applied = false;
+  }
   if (out.error === "workspace_conflict" && Array.isArray(response?.body?.conflicts))
     out.conflicts = response.body.conflicts.filter((conflict) => conflict && typeof conflict === "object").map((conflict) => Object.fromEntries(
       ["target", "id", "base_version", "current_version", "pointer", "base", "current", "proposed", "remove", "kind"]

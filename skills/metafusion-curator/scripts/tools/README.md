@@ -33,6 +33,8 @@ init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本�
 
 正文和图片都使用普通 stage patch，没有单独的文章写通道。source_refs、候选查证数组和来源池不是 stage/commit 参数。
 
+计数或看图片/标签覆盖用 `mf-platform` 计划 `{"action":"entity.stats"}`；`entity.list` 会遍历全部匹配结果，limit 只是页大小。stage 文件接受操作数组或 `{operations:[…]}`；缺失 create ref 自动补名，成功结果在 `result.refs` 返回 UUID、`workspace.version` 返回新版本。创建/checkout 每次最多 100 个实体与关系，stage 每次最多 100 个操作，可分次保存后统一 commit。多行提交说明用 `commit --message-file message.txt`，或 `--message-file -` 从标准输入读取。
+
 `mf-track-content` 计划是 `{workspace_id,expected_version,track_id,inclusion}`，expected_version 是副本版本；默认预览不写，`--apply` 仅暂存收录，不自动提交或合入。
 
 `mf-merge` 前置事实整理通过服务器副本合入，只有 applied=true 才继续生命周期合并；部分成功不盲目重跑。定义、身份合并和文件操作各有独立权限，不能声称跨服务事务。
@@ -40,3 +42,5 @@ init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本�
 `mf-definitions` 支持词项 upsert 和 `action:"field.create"` 新增字段，不替换已有同码字段；list 字段必须有 items。定价示例见[list-price-field.json](templates/list-price-field.json)。定义默认预览，`--apply` 执行；开关不替代用户授权。
 
 来源 help/list 不联网，读取用 `run <operation> <arg>`；完整运行输出保存在任务目录，不放进技能安装目录。所有来源与诊断工具都是可选辅助，不构成提交门槛。
+
+AniList 搜索默认动画；漫画和轻小说用 `node mf-source.ts run anilist.search "检索词" --type MANGA`。详情裸 ID 也可用 `--type MANGA`，URL 中的 `/anime/`、`/manga/` 按原链接决定类型。

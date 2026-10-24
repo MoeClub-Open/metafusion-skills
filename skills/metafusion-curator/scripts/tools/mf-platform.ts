@@ -13,6 +13,7 @@ import {
 const ACTIONS = [
   "entity.get",
   "entity.list",
+  "entity.stats",
   "entity.resolve",
   "entity.current-revision",
   "entity.links",
@@ -52,11 +53,11 @@ export function schemaFor(action?: string) {
     additionalProperties: false,
     required: [
       "action",
-      ...(["definitions", "contract", "entity.list"].includes(a) ? [] : ["id"]),
+      ...(["definitions", "contract", "entity.list", "entity.stats"].includes(a) ? [] : ["id"]),
     ],
     properties: {
       action: { const: a },
-      ...(["definitions", "contract"].includes(a)
+      ...(["definitions", "contract", "entity.stats"].includes(a)
         ? {}
         : a === "entity.list"
           ? {
@@ -81,7 +82,7 @@ export function validatePlan(plan) {
   const allowed =
     plan.action === "entity.list"
       ? ["action", "params", "limit"]
-      : ["definitions", "contract"].includes(plan.action)
+      : ["definitions", "contract", "entity.stats"].includes(plan.action)
         ? ["action"]
         : ["action", "id"];
   if (Object.keys(plan).some((k) => !allowed.includes(k)))
@@ -152,6 +153,7 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
     }
   }
   const paths = {
+    "entity.stats": "/api/catalog/stats",
     "entity.get": entityPath(plan.id),
     "entity.resolve": entityPath(plan.id, "/resolve"),
     "entity.occurrences": entityPath(plan.id, "/occurrences"),
@@ -197,11 +199,13 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
         ? entity(r.body) && r.body.state !== "merged" && !r.body.redirect_id
         : plan.action === "definitions"
           ? record(r.body?.document) && typeof r.body.etag === "string"
-          : plan.action === "contract"
-            ? record(r.body?.paths) && typeof r.body.openapi === "string"
-            : plan.action === "entity.occurrences"
-              ? Array.isArray(r.body?.items)
-              : record(r.body);
+          : plan.action === "entity.stats"
+            ? record(r.body?.kinds) && ["total", "with_pictures", "with_tags"].every((key) => Number.isSafeInteger(r.body[key]) && r.body[key] >= 0)
+            : plan.action === "contract"
+              ? record(r.body?.paths) && typeof r.body.openapi === "string"
+              : plan.action === "entity.occurrences"
+                ? Array.isArray(r.body?.items)
+                : record(r.body);
   return valid
     ? {
         ok: true,
@@ -212,7 +216,7 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
     : { ok: false, outcome: "partial", reason: "response_shape_invalid" };
 }
 export function helpText() {
-  return "mf-platform list | schema [action] | --plan plan.json [--out result.json]\n只读目录查询；编辑使用 mf-workspace init/checkout/stage/commit/push，不支持旧写计划或 --apply。";
+  return "mf-platform list | schema [action] | --plan plan.json [--out result.json]\n只读目录查询；总量与封面/标签覆盖使用 entity.stats。entity.list 会遍历全部匹配结果，limit 是每页数量。编辑使用 mf-workspace init/checkout/stage/commit/push。";
 }
 export async function runCli(
   argv = process.argv.slice(2),

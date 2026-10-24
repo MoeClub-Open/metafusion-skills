@@ -163,6 +163,7 @@ interface WorkspaceOptions {
   relationIDs?: string[];
   name?: string;
   message?: string;
+  messageFile?: string;
   title?: string;
   commitID?: string;
   pullRequestID?: string;
@@ -175,7 +176,7 @@ interface WorkspaceOptions {
   offset?: number;
   status?: string;
 }
-const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8"));
+const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
 function save(file: string, value: unknown) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600, flag: "wx" });
@@ -225,6 +226,8 @@ const queryPath = (pathname: string, query: URLSearchParams) => `${pathname}${qu
  *  server; the version/head below are compare-and-swap expectations. */
 export async function runWorkspace(command: string, options: WorkspaceOptions = {}) {
   const { requestFn = request, entityIDs = [], relationIDs = [] } = options;
+  if (command === "init" && !options.workspaceID && entityIDs.length + relationIDs.length > 100)
+    throw new Error("checkout_limit_exceeded: initialize with at most 100 entity and relation IDs; add the rest with checkout");
   const origin = new URL(options.origin ?? configuredOrigin()).origin;
   const send = async (pathname: string, method = "GET", body?: unknown) => {
     try { return await requestFn(pathname, { method, ...(body === undefined ? {} : { body }) }); }
@@ -353,15 +356,33 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
         body={...payload,...head,id:payload.id??options.requestID??randomUUID()};break;
       }
       case "checkout":
+        if (entityIDs.length + relationIDs.length > 100) throw new Error("checkout_limit_exceeded: maximum 100 entity and relation IDs per request; use repeated checkout commands");
         pathname += "/checkout";
         body = { ...expected, entity_ids: entityIDs, relation_ids: relationIDs };
         break;
       case "stage": {
-        const operations = options.operations ?? input(options);
+        const payload = options.operations ?? input(options);
+        if (record(payload) && payload.expected_version !== undefined && payload.expected_version !== state.workspace.version)
+          throw new Error("workspace_version_conflict: file expected_version differs from the observed workspace version");
+        const operations = Array.isArray(payload) ? payload : payload?.operations;
         if (!Array.isArray(operations) || !operations.length) throw new Error("operations_array_required");
+        if (operations.length > 100) throw new Error("stage_limit_exceeded: maximum 100 operations per save; repeated saves can share one commit");
+        const refs = new Set<string>();
+        for (const [index, op] of operations.entries()) {
+          if (op?.action !== "create" || !op.ref) continue;
+          if (refs.has(op.ref)) throw new Error(`duplicate_create_ref:${op.ref}:operation:${index}`);
+          refs.add(op.ref);
+        }
+        const prepared = operations.map((op, index) => {
+          if (op?.action !== "create" || op.ref) return op;
+          let ref = `create_${index + 1}`;
+          while (refs.has(ref)) ref += "_";
+          refs.add(ref);
+          return { ...op, ref };
+        });
         pathname += "/changes";
         method = "PUT";
-        body = { ...expected, operations };
+        body = { ...expected, operations: prepared };
         break;
       }
       case "members": {
@@ -376,11 +397,16 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
         method = "PATCH";
         body = { ...(options.edit ?? input(options)), ...expected };
         break;
-      case "commit":
-        if (!options.message?.trim()) throw new Error("commit_message_required");
+      case "commit": {
+        if (options.message !== undefined && options.messageFile) throw new Error("choose_message_or_message_file");
+        const message = options.messageFile
+          ? fs.readFileSync(options.messageFile === "-" ? 0 : options.messageFile, "utf8").replace(/^\uFEFF/, "")
+          : options.message;
+        if (!message?.trim()) throw new Error("commit_message_required");
         pathname += "/commits";
-        body = { ...expected, id: options.commitID ?? randomUUID(), message: options.message };
+        body = { ...expected, id: options.commitID ?? randomUUID(), message };
         break;
+      }
       case "push":
         pathname += "/push";
         body = { ...head, ...(options.title ? { title: options.title } : {}) };
@@ -451,8 +477,8 @@ export async function runCli(argv = process.argv.slice(2)) {
     console.log("mf-workspace head|history|revisions|diff|commit-diff|pr-diff|pr-commits|init|fork|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|version|tag|tags|stash|stashes|events|merge-status|snapshot|compare|blame|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
       + "--dir DIR holds the last observed server workspace, version and head; never credentials.\n"
       + "init: [--name NAME] [--entity UUID] [--relation UUID], or --workspace UUID to attach.\n"
-      + "checkout: --entity UUID / --relation UUID (repeatable). stage: --file operations.json.\n"
-      + "commit: --message TEXT [--commit UUID]. push: [--title TEXT].\n"
+      + "checkout: --entity UUID / --relation UUID (at most 100 IDs combined per request). stage: --file operations.json (array or {operations}; 1–100 operations, missing create refs are generated).\n"
+      + "commit: --message TEXT or --message-file PATH (use - for stdin), [--commit UUID]. Repeated stage saves can share one commit. push: [--title TEXT].\n"
       + "rebase: [--onto UUID] [--file native-rebase.json] [--message TEXT] [--commit UUID]. receipt: [--commit UUID].\n"
       + "fork: --dir NEW_DIR --commit UUID [--name NAME] [--entity UUID / --relation UUID].\n"
       + "version|tag|stash: --file native-action.json [--request UUID]. Version/head come from the saved observed copy.\n"
@@ -466,7 +492,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   const options: WorkspaceOptions = { entityIDs: [], relationIDs: [] };
   const fields: Record<string, keyof WorkspaceOptions> = { "--dir": "dir", "--workspace": "workspaceID", "--name": "name",
     "--author":"authorID","--since":"since","--until":"until","--state":"state","--basis":"basis","--base":"baseID","--onto":"ontoID","--request":"requestID","--target":"target","--record":"recordID","--pointer":"pointer",
-    "--message": "message", "--title": "title", "--commit": "commitID", "--pr": "pullRequestID", "--file": "file", "--status": "status" };
+    "--message": "message", "--message-file": "messageFile", "--title": "title", "--commit": "commitID", "--pr": "pullRequestID", "--file": "file", "--status": "status" };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i], value = args[++i];
     if (!value || value.startsWith("--")) throw new Error(`missing_argument:${flag}`);

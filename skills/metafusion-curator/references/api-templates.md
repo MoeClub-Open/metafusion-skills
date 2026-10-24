@@ -18,6 +18,8 @@ POST /api/catalog/workspaces
 
 返回 workspace 的 id、version、head_commit_id、objects 与 dirty_count。objects 区分 base、committed 和 document；新副本还没有 head。后续 checkout 用 `POST /api/catalog/workspaces/{id}/checkout`，传 `{expected_version,entity_ids,relation_ids}` 加入其他正式对象。
 
+创建与每次 checkout 的 `entity_ids`、`relation_ids` 合计最多 100 个，超出返回 `invalid_checkout_size`；可多次 checkout。每次 stage 为 1–100 个操作，每个 update 最多 200 个 patch 路径。多次 stage 可以合成一个 commit，不能把 stage 上限误认为整笔 commit 的对象上限。JSON 请求体最多 2 MiB，commit message 去除首尾空白后为 1–2000 个 Unicode 字符；超大 stage 应先按结构依赖拆分，后续批次用前批返回的 UUID。
+
 暂存已有对象修改：
 
 ```http
@@ -38,9 +40,11 @@ PUT /api/catalog/workspaces/{id}/changes
 
 示例字段需换成当前定义中实际存在的字段，删除路径也须对应实际事实。`patch` 使用 JSON Pointer；value 可以是 null，删除使用 remove。对象字段逐键处理，数组按完整值替换。
 
-`mf-workspace stage --file operations.json` 的文件内容是**裸的 operations 数组**（`[{…},{…}]`，即上例 `operations` 键里那个数组本身），不要把 `expected_version` 外层对象一起写进去——整包会被拒绝为 `ok:false` / `operations_array_required`，且 `--file` 路径相对当前工作目录（写 `ws-x/operations.json`，不是 `operations.json`）。stage 可能以 0 退出却什么都没登记，所以接着要用 `status` 看 `objects` 与 `dirty_count` 确认，而不是只看返回里的 refs。
+`mf-workspace stage --file operations.json` 接受裸 operations 数组或 `{operations:[…]}` 对象；`expected_version` 由本地保存的服务器副本版本提供。路径相对当前工作目录。成功结果的 `result.refs` 将 ref 映射为 UUID，`workspace.version` 是保存后的版本；失败返回 `ok:false`，命令行退出码为 1。结果未知时先读 `status`/原请求回执，保留并核对原请求，不重新生成 create。文档类型错误返回 `400 invalid_document`，附从 0 开始的 `operation` 与相对实体/关系文档的 `pointer`，例如 `/pictures/0/caption`；caption 应为 `{"ja-JP":"キービジュアル"}`，source 可省略，提供时必须为来源对象。
 
-**每个 `action:"create"` 都必须带一个互不重复的 `ref`，关系边也一样**，即使没有任何操作引用它：服务端对全部 create 统一分配稳定 ID，缺 `ref` 会让整批返回 `400 invalid_local_reference`（外层仍是 `ok:false` 的 200/400 JSON，不是异常）。`$ref` 只能指向同一批里已声明的 ref 名，且该对象必须只有 `$ref` 一个键。
+原生 API 的每个 `action:"create"` 都必须带互不重复的 `ref`，关系边也一样；`mf-workspace stage` 自动为缺失的 ref 补名，显式重复名会在发送前报错。需要同批引用时应自行声明有含义的 ref。`$ref` 只能指向同一批里已声明的 ref 名，且该对象必须只有 `$ref` 一个键。
+
+文件若含 `expected_version`，必须与本地已观察到的副本版本一致；工具不会静默覆盖文件中的旧版本后重放。
 
 新建多个关联对象时按依赖顺序声明 ref：
 
@@ -82,6 +86,8 @@ POST /api/catalog/workspaces/{id}/push
 ```
 
 commit 的 author 是执行提交的账号，authors 保留修改贡献者，merged_by 单独记录合并者。PR 的只读 source_base_id 固定本次提交链基线。
+
+本地提交说明可用 `mf-workspace commit --dir DIR --message-file message.txt`；`--message-file -` 从标准输入读取。文件按 UTF-8 读取并移除开头 BOM，保留正文换行，避免 shell 将引号或 `\n` 当成正文。该选项与 `--message` 二选一。
 
 version 使用最新读取的副本值；commit 后必要时 GET 副本获取，不按例子或提交次数递增猜测。push 前提交所有未提交改动。`applied=true` 才改变正式目录；普通用户返回 `applied=false` 及 PR。非副本成员的审核人合并时，结果中的 workspace 可为 null；只读取返回的冻结 PR 和提交，不再获取源副本。连续多次 commit 后可一同 push；同一个已确认 head 的 push 可读取相同合入结果或 PR。
 

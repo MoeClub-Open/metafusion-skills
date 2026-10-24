@@ -63,7 +63,7 @@ const OPERATION_INPUTS = {
   "tmdb.tv": { argument: "1–12 位数字 TMDB TV ID；不接受详情 URL。", example: "mf-source run tmdb.tv 123", note: "读取需要配置 TMDB_API_KEY 或 TMDB_ACCESS_TOKEN。" },
   "tmdb.search": { argument: "非空电影检索词；此操作默认搜索 movie。", example: "mf-source run tmdb.search ExampleMovie", note: "读取需要配置 TMDB_API_KEY 或 TMDB_ACCESS_TOKEN。" },
   "anilist.media": { argument: "1–12 位数字 ID（裸 ID 默认 anime），或含 /anime/{id}/、/manga/{id}/ 的 AniList URL。", example: "mf-source run anilist.media 123" },
-  "anilist.search": { argument: "非空 AniList media 检索词。", example: "mf-source run anilist.search Frieren" },
+  "anilist.search": { argument: "非空 AniList media 检索词；--type ANIME（默认）或 MANGA（漫画/轻小说）。", example: "mf-source run anilist.search Frieren --type MANGA" },
   "mal.anime": { argument: "1–12 位数字 MAL ID（裸 ID 默认 anime），或 myanimelist.net/anime/{id} 页面 URL。", example: "mf-source run mal.anime 123", note: "读取需要配置 MAL_CLIENT_ID。" },
   "mal.search": { argument: "非空 MyAnimeList 检索词。", example: "mf-source run mal.search Frieren", note: "读取需要配置 MAL_CLIENT_ID。" },
   "isni.record": { argument: "16 位 ISNI（前 15 位数字，末位数字或 X）；可带空格/连字符或 <ISNI> 包装。", example: "mf-source run isni.record 0000000000000001", note: "该读取入口检查形状，不执行 MOD 11-2 校验位核验。" },
@@ -548,13 +548,13 @@ function helpPayload(target) {
     usage: [
       `${MF_SOURCE_COMMAND} list`,
       `${MF_SOURCE_COMMAND} help [source|operation]`,
-      `${MF_SOURCE_COMMAND} run <operation> <arg> [--out <path>]`,
+      `${MF_SOURCE_COMMAND} run <operation> <arg> [--type ANIME|MANGA] [--out <path>]`,
     ],
     operations: [...registry.operations.values()].map(copyOperation).sort((a, b) => a.id.localeCompare(b.id)),
     note: `请在 skills/metafusion-curator/scripts/tools 目录运行命令。${HELP_NOTE} 连接状态只由单次 run 响应报告。`,
   };
   const operation = registry.operations.get(target);
-  if (operation) return { usage: `${MF_SOURCE_COMMAND} run <operation> <arg> [--out <path>]`, note: `请在 skills/metafusion-curator/scripts/tools 目录运行命令。${HELP_NOTE}`, operation: copyOperation(operation) };
+  if (operation) return { usage: `${MF_SOURCE_COMMAND} run <operation> <arg> [--type ANIME|MANGA] [--out <path>]`, note: `请在 skills/metafusion-curator/scripts/tools 目录运行命令。${HELP_NOTE}`, operation: copyOperation(operation) };
   const sourceId = canonicalSourceId(target);
   const source = registry.sources.get(sourceId);
   if (source) return {
@@ -570,6 +570,15 @@ function parseOutputOption(argv) {
   if (args.length === 0) args.push("help");
   if (args[0] === "--help" || args[0] === "-h") args[0] = "help";
   let outPath = null;
+  let mediaType: string | null = null;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--type") continue;
+    const value = args[index + 1]?.toUpperCase();
+    if (mediaType || !["ANIME", "MANGA"].includes(value)) throw new SourceCommandError("bad_input", "--type 只允许 ANIME 或 MANGA");
+    mediaType = value;
+    args.splice(index, 2);
+    index -= 1;
+  }
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (value === "--out") {
@@ -586,17 +595,18 @@ function parseOutputOption(argv) {
     }
   }
   if (args.some(value => value.startsWith("--"))) throw new SourceCommandError("bad_input", "不支持的命令选项");
-  return { args, outPath };
+  return { args, outPath, mediaType };
 }
 
 export async function executeMfSource(argv, deps: Record<string, any> = {}) {
-  const { args } = parseOutputOption(argv);
+  const { args, mediaType } = parseOutputOption(argv);
   const [command, ...rest] = args;
   if (command === "list" && rest.length === 0) return { sources: listSources() };
   if (command === "help" && rest.length <= 1) return helpPayload(rest[0]);
   if (command === "run" && rest.length >= 2) {
     const [operation, ...argParts] = rest;
-    return dispatchSourceOperation(operation, argParts.join(" "), deps);
+    if (mediaType && !["anilist.search", "anilist.media"].includes(operation)) throw new SourceCommandError("bad_input", "--type 适用于 anilist.search / anilist.media");
+    return dispatchSourceOperation(operation, argParts.join(" "), { ...deps, ...(mediaType ? { type: mediaType } : {}) });
   }
   throw new SourceCommandError("bad_input", `用法：${MF_SOURCE_COMMAND} list | help [source|operation] | run <operation> <arg> [--out <path>]`);
 }
