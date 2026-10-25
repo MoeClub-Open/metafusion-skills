@@ -72,6 +72,10 @@ title、original_language、translations、attributes、external_links、picture
 
 ### `tags`
 
+`tags` 的音乐建议词包括 `pop`、`j_pop`、`jazz`、`hip_hop`、`electronic`、`alternative`、`rnb`、`children_music`、`spoken_word`、`asmr` 等，以实例 definitions 为准。这些是建议词，不是白名单；来源给出的实际题材可以用自由标签保留，不能因词表缺项就退化为只写 album，也不能根据常识或题名补造题材。
+
+主体可用 `birth_date`、`death_date`、`formation_date`、`dissolution_date`、`occupations`（字符串数组）及 `activity_periods`（`[{begin?,end?}]`）。日期默认含年份；只有字段声明 `allow_yearless:true` 时可用 `--MM-DD`，出生日期种子已启用该能力。职业与活动期描述主体自身，具体作品职责仍是关系，不能互相替代。新增字段与词项须由实例内容 seed 或管理操作真正发布后才能使用。
+
 **纯字符串数组**（不是对象、不是词项码）：`["动画","剧场版"]`。当前种子允许八种 kind 写该字段。
 `GET /api/catalog/tags` 是对它的频次聚合，不是可写的字典表。
 

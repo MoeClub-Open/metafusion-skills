@@ -1220,8 +1220,8 @@ export async function searchTmdb(query, opts) {
 
 // ───────────────────────── 5. AniList（公开 GraphQL） ─────────────────────────
 
-const ANILIST_MEDIA_QUERY = "query($id:Int,$type:MediaType){Media(id:$id,type:$type){id title{romaji english native} coverImage{large medium color} bannerImage startDate{year month day} endDate{year month day} synonyms episodes format status season description siteUrl studios{edges{node{name}}}}}";
-const ANILIST_SEARCH_QUERY = "query($s:String!,$p:Int,$l:Int,$type:MediaType){Page(page:$p,perPage:$l){pageInfo{total perPage hasNextPage} media(search:$s,type:$type){id title{romaji english native} coverImage{large} startDate{year month day} format status season siteUrl}}}";
+const ANILIST_MEDIA_QUERY = "query($id:Int,$type:MediaType){Media(id:$id,type:$type){id type title{romaji english native} genres coverImage{large medium color} bannerImage startDate{year month day} endDate{year month day} synonyms episodes format status season description siteUrl studios{edges{node{name}}}}}";
+const ANILIST_SEARCH_QUERY = "query($s:String!,$p:Int,$l:Int,$type:MediaType){Page(page:$p,perPage:$l){pageInfo{total perPage hasNextPage} media(search:$s,type:$type){id type title{romaji english native} genres coverImage{large} startDate{year month day} format status season siteUrl}}}";
 
 /** 接受 1 / https://anilist.co/anime/20757/xxx / { id, type }。 */
 export function normalizeAniListId(input, defaultType) {
@@ -1276,7 +1276,8 @@ export function mapAniListMedia(data) {
     image_page_url: data.bannerImage || null,
     dates: { start: formatDatePart(data.startDate), end: formatDatePart(data.endDate), season: clean(data.season) },
     external_ids: { anilist: String(data.id) },
-    url: data.siteUrl || ("https://anilist.co/anime/" + data.id),
+    genres: data.genres || null,
+    url: data.siteUrl || ("https://anilist.co/" + (data.type === "MANGA" ? "manga/" : "anime/") + data.id),
     notes: [
       data.format ? "形式=" + clean(data.format) : null,
       data.status ? "状态=" + clean(data.status) : null,
@@ -1348,6 +1349,7 @@ export async function searchAniList(query, opts) {
     native: clean(m.title && m.title.native),
     image_url: (m.coverImage && m.coverImage.large) || null,
     dates: { start: formatDatePart(m.startDate), season: clean(m.season) },
+    genres: m.genres || null,
     format: clean(m.format), status: clean(m.status), url: m.siteUrl || null,
   }));
   return readResult(res, "anilist", {

@@ -24,7 +24,7 @@ Bushiroad Music / BanG Dream：`price` 保留来源原始字符串，仅唯一�
 | Open Library | `openlibrary.search/work/edition/editions/author/isbn` | 无连接器 key。 |
 | Internet Archive | `archive.item/search/wayback`；可为 VGMdb 读取存档 | 无连接器 key。空元数据需按连接器判读，不能只看 HTTP 状态。 |
 | TMDB | `tmdb.movie/tv/search` | `TMDB_API_KEY` 或 `TMDB_ACCESS_TOKEN`。 |
-| AniList | `anilist.media/search`，CLI `--type MANGA` 查询漫画/轻小说，默认 `ANIME` | 无连接器 key；聚合资料按实际内容判断支持范围。 |
+| AniList | `anilist.media/search`，CLI `--type MANGA` 查询漫画/轻小说，默认 `ANIME`；详情与候选含原始 genres | 无连接器 key；聚合资料按实际内容判断支持范围，不用常识代替实际返回字段。 |
 | MyAnimeList | `mal.anime/search` | `MAL_CLIENT_ID`。 |
 | ISNI Registry、VIAF | `isni.record`、`viaf.record` | 未声明连接器 key。失败响应可能来自网关、代理或解析变化；仅连接器校验后的明确 `found:false` 表示未找到。HTTP 状态本身不作结论。 |
 | OCLC FAST | `oclc.fast`：只读公开 FAST suggestion 查询，不实现带认证的 WorldCat API | 不读取 WorldCat 凭据。FAST 端点可能拒绝请求或发生变化；拒绝/解析失败按未知处理，不能据此声称 WorldCat 记录不存在或“配置 key 后即可用”。 |

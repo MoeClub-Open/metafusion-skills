@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { findIdentity, runCli } from "./mf-find-identity.ts";
 
-const entity = (id, extra = {}) => ({ id, kind: "work", title: "夜明け", status: "published", version: 1, ...extra });
+const entity = (id, extra = {}) => ({ id, kind: "work", title: "夜明け", state: "active", version: 1, ...extra });
 const response = (records = [], overrides = {}) => ({ status: 200, body: {
   basis: "postgres_repeatable_read", total: records.length, complete: true,
   items: records.map((item) => ({ matched: item, canonical: item })), ...overrides } });
@@ -86,7 +86,7 @@ test("截断、错误响应和失败不伪装为无重复，旧实例不回退�
 test("未解析 canonical、已删除终点或无法核验的命中必须停止依赖写入", async () => {
   const original = entity("old");
   for (const row of [{ matched: original, canonical: null, resolution_error: "canonical_identity_unverified" },
-    { matched: original, canonical: entity("target", { status: "deleted" }) },
+    { matched: original, canonical: entity("target", { state: "deleted" }) },
     { matched: entity("unrelated", { title: "Unrelated" }), canonical: original }]) {
     const r = await findIdentity({ titles: ["夜明け"], requestFn: query(response([], { total: 1, items: [row] })) });
     assert.equal(r.decision, "needs_evidence");

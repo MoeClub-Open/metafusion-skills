@@ -9,6 +9,7 @@
 - 正常实体列表排除 deleted/merged；历史 ID 用 resolve/identity 解析。当前修订以 `revision.version == entity.version` 确定，不默认第一行最新。
 - 总量和封面/标签覆盖用公开 `GET /api/catalog/stats`（本地 `mf-platform` 的 `{"action":"entity.stats"}`）；按标签频次读 `/tags`。`entity.list` 会遍历全部匹配结果，limit 仅是每页数量；只为计数不要扫全库。管理端 `/entities/stats` 包含墓碑和 PR 统计，仍需生命周期权限。新接口是否已部署先看目标实例契约，404 不回退成全库扫描。
 - 身份候选按题名精确归一匹配；无命中不证明没有条目。用已核实的外部标识、原题名及带季/媒介后缀的名称变体复查；普通文本检索仅作候选发现，须逐条核身份。不能为提升检索率凭猜测造别名或把模糊命中当成同一实体。
+- 本地 find-identity 的 `--variants` 会额外发现带括号限定的同题名，在 `title_discovery` 单列搜索快照中的有限候选和失败信息。它不改变原生精确候选、权限或身份确认规则。
 - 修订的 snapshot 是写后快照；Track 历史投影可能按可见性裁剪，不能当作完整备份。已有来源只说明其实际支持范围，不自动为最新快照的所有字段背书。
 - Release.subjects 和 Track.contents 是结构事实，不是关系边；可在同一副本暂存后原子合入。
 

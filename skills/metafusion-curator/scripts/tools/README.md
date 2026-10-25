@@ -44,3 +44,7 @@ init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本�
 来源 help/list 不联网，读取用 `run <operation> <arg>`；完整运行输出保存在任务目录，不放进技能安装目录。所有来源与诊断工具都是可选辅助，不构成提交门槛。
 
 AniList 搜索默认动画；漫画和轻小说用 `node mf-source.ts run anilist.search "检索词" --type MANGA`。详情裸 ID 也可用 `--type MANGA`，URL 中的 `/anime/`、`/manga/` 按原链接决定类型。
+
+AniList 的详情和检索候选都返回来源原始 `genres`，不由程序猜测或自动写入目录。保存候选时保留完整对象及 `url`；iTunes 命中的页面地址位于 `data.raw.hits[].url`。缺 URL 时省略引用行，不能把 `null` 或 `undefined` 拼进提交说明，来源仍为可选。
+
+裸题名查重可用 `node mf-find-identity.ts --kind work --title "原题名" --variants`，补充发现带括号限定的同题名。额外结果在 `title_discovery.items`，不混入精确候选；它仅覆盖每个题名的首个搜索页，失败记录在 `title_discovery.failures`，不能把失败当作没有重复条目。没有经过身份核对，不自动复用、新建或生成别名。

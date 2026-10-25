@@ -217,7 +217,7 @@ function candidateEntity(entity) {
     id: entity.id || null,
     kind: entity.kind || null,
     title: entity.title || "",
-    status: entity.status || null,
+    state: entity.state || null,
     work_id: entity.work_id || null,
     content_unit_id: entity.content_unit_id || null,
     release_id: entity.release_id || null,
@@ -254,6 +254,35 @@ function unresolvedCandidate(original, reasons, status, code) {
   };
 }
 
+// Full-text discovery supplements exact identity lookup. These results remain
+// separate from verified exact candidates and never establish identity.
+async function discoverQualifiedTitles(query, requestFn) {
+  const items = new Map(), failures = [];
+  const baseTitle = (value) => normalizeTitle(value).replace(/\s*[（(][^()（）]+[）)]$/u, "").trim();
+  for (const title of query.titles) {
+    const params = new URLSearchParams({ kind: query.kind, q: title, limit: "20" });
+    if (query.workId) params.set("work_id", query.workId);
+    if (query.releaseId) params.set("release_id", query.releaseId);
+    if (query.mediumId) params.set("medium_id", query.mediumId);
+    try {
+      const response = await requestFn(`/api/catalog/entities?${params}`, { tries: 1 });
+      if (response.status !== 200 || !Array.isArray(response.body?.items)) {
+        failures.push({ title, status: response.status, reason: "title_discovery_unavailable" });
+        continue;
+      }
+      for (const entity of response.body.items) {
+        if (!entity?.id || entity.kind !== query.kind) continue;
+        const matches = entityTitleValues(entity).filter(({ value }) =>
+          normalizeTitle(value) !== normalizeTitle(title) && baseTitle(value) === baseTitle(title));
+        if (matches.length) items.set(entity.id, { entity: candidateEntity(entity), matched_titles: matches, match_method: "qualified_title", identity_confirmed: false });
+      }
+    } catch {
+      failures.push({ title, status: 0, reason: "title_discovery_unavailable" });
+    }
+  }
+  return { items: [...items.values()], failures, scope: "first_search_page_per_title", basis: "index_snapshot" };
+}
+
 export async function findIdentity({
   kind = "work",
   titles = [],
@@ -263,6 +292,7 @@ export async function findIdentity({
   releaseId,
   mediumId,
   limit = DEFAULT_LIMIT,
+  variants = false,
   requestFn = apiRequest,
 }: Record<string, any> = {}) {
   const query = validateInput({
@@ -403,7 +433,7 @@ export async function findIdentity({
     if (
       !canonical?.id ||
       canonical.kind !== query.kind ||
-      ["merged", "deleted"].includes(canonical.status) ||
+      ["merged", "deleted"].includes(canonical.state) ||
       (query.workId && canonical.work_id !== query.workId) ||
       (query.releaseId && canonical.release_id !== query.releaseId) ||
       (query.mediumId && canonical.medium_id !== query.mediumId) ||
@@ -451,8 +481,10 @@ export async function findIdentity({
     ),
   );
   const complete = coverageIsComplete(coverage) && unknown.length === 0;
+  const related = variants ? await discoverQualifiedTitles(query, requestFn) : undefined;
+  if (related) related.items = related.items.filter((item) => !candidates.some((candidate) => candidate.canonical_id === item.entity.id));
   const decision =
-    candidates.length || !complete || errors.length
+    candidates.length || related?.items.length || related?.failures.length || !complete || errors.length
       ? "needs_evidence"
       : "no_visible_candidate";
   return {
@@ -465,6 +497,7 @@ export async function findIdentity({
     query_modes: queryModes,
     coverage,
     candidates,
+    ...(related ? { title_discovery: related } : {}),
     unknown,
     errors,
     decision,
@@ -538,6 +571,9 @@ export function parseArgs(argv) {
         options.limit = parsed;
         break;
       }
+      case "--variants":
+        options.variants = true;
+        break;
       case "--out":
         options.out = value();
         break;
@@ -553,6 +589,7 @@ export function usage() {
     "用法：node mf-find-identity.ts [选项]",
     "  --kind <kind>             实体类型，默认 work",
     "  --title <题名>            可重复；比较基础题名、translations.title 与 aliases",
+    "  --variants                补充发现带括号限定的同题名条目；仍需核对身份",
     "  --external <provider=id>  可重复；外部标识精确匹配",
     "  --attribute <key=value>   可重复；attributes 字段精确匹配",
     "  --work-id <id>            限定 expression/content_unit 所属 Work",

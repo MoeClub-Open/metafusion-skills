@@ -18,7 +18,7 @@ const SOURCE_KEYS = new Set(["kind", "citation", "url"]);
 const TERM_KEYS = new Set(["names", "enabled"]);
 const FIELD_KEYS = new Set([
   "names", "type", "applicable_kinds", "fields", "items", "enabled", "required", "searchable", "comparable",
-  "min", "max", "unit", "vocabulary", "kinds", "anchor_key", "range_start", "semantics", "hidden",
+  "min", "max", "unit", "vocabulary", "kinds", "anchor_key", "range_start", "semantics", "hidden", "allow_yearless",
 ]);
 const SAFE_FIELD_TYPES = new Set(["group", "list", "number", "text", "boolean", "date", "url", "multilingual"]);
 const FIELD_CODE = /^[a-z][a-z0-9_]{0,63}$/;
@@ -115,7 +115,7 @@ function validateFieldNode(field, { depth = 0, top = false }: Record<string, any
   if (!has(field, "type") || !SAFE_FIELD_TYPES.has(field.type)) return "unsupported_field_type";
   if (!has(field, "names") || validateNames(field.names) || !hasFourLocales(field.names)) return "four_locale_names_required";
   if (typeof field.enabled !== "boolean") return "invalid_field_enabled";
-  for (const key of ["required", "searchable", "comparable", "hidden"]) {
+  for (const key of ["required", "searchable", "comparable", "hidden", "allow_yearless"]) {
     if (has(field, key) && typeof field[key] !== "boolean") return "invalid_field_boolean";
   }
   if (top && (!Array.isArray(field.applicable_kinds) || field.applicable_kinds.length === 0)) return "top_applicable_kinds_required";
@@ -131,6 +131,7 @@ function validateFieldNode(field, { depth = 0, top = false }: Record<string, any
     && (field.type !== "number" || validateNames(field.unit) || !hasFourLocales(field.unit))) return "invalid_field_unit";
   if (has(field, "vocabulary") || has(field, "kinds")) return "unsupported_field_property";
   if (field.type !== "list" && has(field, "items")) return "non_list_items_not_supported";
+  if (field.allow_yearless && field.type !== "date") return "invalid_field_yearless_date";
   if (field.type === "list" && has(field, "fields")) return "list_fields_not_supported";
   if (has(field, "anchor_key") && (field.type !== "group" || typeof field.anchor_key !== "string" || !FIELD_CODE.test(field.anchor_key))) {
     return "invalid_field_anchor_key";
@@ -394,6 +395,7 @@ function normalizeFieldForWire(field) {
     if (!has(normalized, key)) normalized[key] = false;
   }
   if (normalized.hidden === false) delete normalized.hidden;
+  if (normalized.allow_yearless === false) delete normalized.allow_yearless;
   if (Array.isArray(normalized.applicable_kinds) && normalized.applicable_kinds.length === 0) {
     delete normalized.applicable_kinds;
   }
