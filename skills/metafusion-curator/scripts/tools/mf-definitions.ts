@@ -703,6 +703,7 @@ export function usage() {
     "  node mf-definitions.ts plan <plan.json> [--apply] [--out <result.json>]",
     "",
     "list/read 默认读取管理端 DefinitionConfig；--public 读取公开投影，不能用作写入源。",
+    "list 的 items[].terms 为带 code 的数组；read 的 definitions.document.vocabularies.<code>.terms 保留按词项码索引的对象。",
     "plan 默认只预览；--apply 单次 PUT，并要求 --out 以独占方式预留结果文件。",
     "词项计划: expected_etag, vocabulary, term_code, term:{names?,enabled?}, edit_note, sources。",
     "新词项必须同时提供完整 names 与 enabled；既有词项的 names 按 locale 合并，未提交的 term 字段保留。",

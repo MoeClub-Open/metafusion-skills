@@ -41,10 +41,14 @@ init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本�
 
 `mf-definitions` 支持词项 upsert 和 `action:"field.create"` 新增字段，不替换已有同码字段；list 字段必须有 items。定价示例见[list-price-field.json](templates/list-price-field.json)。定义默认预览，`--apply` 执行；开关不替代用户授权。
 
+`mf-definitions read --public` 保留原始接口文档，词项位于 `definitions.document.vocabularies.<code>.terms`，是按 code 索引的对象；`list --public` 输出浏览用摘要，`items[].terms` 是带 code 的数组。两者是不同命令的固定输出，读取脚本应选择一种入口，不用双格式兼容猜测。
+
+`mf-audit-external-links` 按当前外链类型选择 Bangumi 条目、人物、角色或单集接口，并检查 MusicBrainz 普通、发行、录音外链；同一实体的每条匹配外链分别核对。ID 从必填 URL 解析，提供了 external_id 时还须与 URL 一致。`checked` 计外链数，`ok` 仅表示类型和题名线索相符，`identity_verified` 仍为 false；来源不可用列入 unknown，审计不自动修改目录。
+
 来源 help/list 不联网，读取用 `run <operation> <arg>`；完整运行输出保存在任务目录，不放进技能安装目录。所有来源与诊断工具都是可选辅助，不构成提交门槛。
 
 AniList 搜索默认动画；漫画和轻小说用 `node mf-source.ts run anilist.search "检索词" --type MANGA`。详情裸 ID 也可用 `--type MANGA`，URL 中的 `/anime/`、`/manga/` 按原链接决定类型。
 
-AniList 的详情和检索候选都返回来源原始 `genres`，不由程序猜测或自动写入目录。保存候选时保留完整对象及 `url`；iTunes 命中的页面地址位于 `data.raw.hits[].url`。缺 URL 时省略引用行，不能把 `null` 或 `undefined` 拼进提交说明，来源仍为可选。
+AniList 的详情和检索候选都返回来源原始 `genres`，不由程序猜测或自动写入目录。保存候选时保留完整对象：`url` 是本次实际读取地址，`human_page` 是资料页面链接，后者不表示已额外读取；iTunes 候选的页面地址另在 `data.raw.hits[].url`。缺 URL 时省略引用行，不能把 `null` 或 `undefined` 拼进提交说明，来源仍为可选。
 
 裸题名查重可用 `node mf-find-identity.ts --kind work --title "原题名" --variants`，补充发现带括号限定的同题名。额外结果在 `title_discovery.items`，不混入精确候选；它仅覆盖每个题名的首个搜索页，失败记录在 `title_discovery.failures`，不能把失败当作没有重复条目。没有经过身份核对，不自动复用、新建或生成别名。
