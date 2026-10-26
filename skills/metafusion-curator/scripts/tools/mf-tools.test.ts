@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { mergeEntity, unionInto, identityConflicts } from "./mf-lib.ts";
-import { checkBangumi, checkMusicBrainz } from "./mf-audit-external-links.ts";
+import { checkBangumi, checkMusicBrainz, selectAuditLinks } from "./mf-audit-external-links.ts";
 
 process.env.MF_BASE = "https://example.com";
 process.env.MF_PAT = "test-token-not-a-real-credential";
@@ -200,7 +200,7 @@ test("收录并集保留同一表达的不同定位并避免位置冲突", () =>
 
 test("外部库权限或网络未知不能被归为所有类型 404", async () => {
   let count = 0;
-  const result = await checkMusicBrainz(entity("work"), "external", {
+  const result = await checkMusicBrainz(entity("work"), { kind: "musicbrainz", url: "https://musicbrainz.org/release-group/12345678-1234-1234-1234-123456789abc" }, {
     lookup: async () => ({ status: ++count === 1 ? 403 : 404 }),
     pace: async () => {},
   });
@@ -216,8 +216,8 @@ test("Bangumi 主体查 persons/characters，403 为未知且同名不证明身�
   ]) {
     let requested;
     const result = await checkBangumi(
-      entity("agent", { kind: "agent", attributes: { tags: [type] } }),
-      "1",
+      entity("agent", { kind: "agent", attributes: {} }),
+      { kind: `bangumi_${type}`, url: `https://bgm.tv/${type}/1` },
       {
         lookup: async (url) => {
           requested = new URL(url).pathname;
@@ -228,11 +228,53 @@ test("Bangumi 主体查 persons/characters，403 为未知且同名不证明身�
     assert.equal(requested, `/v0/${resource}/1`);
     assert.equal(result.ok, null);
   }
-  const match = await checkBangumi(entity("work"), "1", {
+  const match = await checkBangumi(entity("work"), { kind: "bangumi", url: "https://bgm.tv/subject/1" }, {
     lookup: async () => ({ status: 200, json: { name: "Same" } }),
   });
   assert.equal(match.ok, true);
   assert.equal(match.identity_verified, false);
+  const unreadable = await checkBangumi(entity("work"), { kind: "bangumi", url: "https://bgm.tv/subject/1" }, {
+    lookup: async () => ({ status: 200, json: {} }),
+  });
+  assert.equal(unreadable.ok, null);
+});
+
+test("外链审计覆盖专用类型并从 URL 取 ID", async () => {
+  const mbid = "12345678-1234-1234-1234-123456789abc";
+  const links = [
+    { kind: "bangumi_person", url: "https://bgm.tv/person/1" },
+    { kind: "bangumi_character", url: "https://bgm.tv/character/2" },
+    { kind: "bangumi_episode", url: "https://bgm.tv/ep/3" },
+    { kind: "musicbrainz_release", url: `https://musicbrainz.org/release/${mbid}` },
+    { kind: "recording_mbid", url: `https://musicbrainz.org/recording/${mbid}` },
+  ];
+  assert.equal(selectAuditLinks({ external_links: links }, "bangumi").length, 3);
+  assert.equal(selectAuditLinks({ external_links: links }, "musicbrainz").length, 2);
+  let requested;
+  const result = await checkMusicBrainz(entity("release"), links[3], {
+    lookup: async (url) => { requested = new URL(url).pathname; return { status: 200, json: { title: "Same" } }; },
+    pace: async () => {},
+  });
+  assert.equal(requested, `/ws/2/release/${mbid}`);
+  assert.equal(result.ok, true);
+  assert.equal(result.identity_verified, false);
+});
+
+test("外链审计区分错标路径与 ID 冲突", async () => {
+  const mbid = "12345678-1234-1234-1234-123456789abc";
+  const result = await checkMusicBrainz(entity("agent", { kind: "agent" }), { kind: "musicbrainz", url: `https://musicbrainz.org/release-group/${mbid}` }, {
+    lookup: async (url) => new URL(url).pathname.includes("/artist/") ? { status: 200, json: { name: "Same" } } : { status: 404 },
+    pace: async () => {},
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.matchedType, "artist");
+  assert.equal(result.urlType, "release-group");
+  let lookups = 0;
+  const invalid = await checkBangumi(entity("agent"), { kind: "bangumi_person", url: "https://bgm.tv/person/1", external_id: "2" }, {
+    lookup: async () => { lookups++; return { status: 404 }; },
+  });
+  assert.equal(invalid.ok, false);
+  assert.equal(lookups, 0);
 });
 
 async function isolatedAudit(run) {

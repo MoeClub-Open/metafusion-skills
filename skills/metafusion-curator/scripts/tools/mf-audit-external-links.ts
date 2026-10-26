@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-// 外部标识同一性审计（只读）：核验 external_links[].kind 是否真的指向"同一个对象"。
-//
-// 为什么值得单独一趟：**标识指错对象比字段缺失更危险**——它会让系统把别的作品/人物
-// 当成同一对象，而结构校验看不出来。实战中在 54 条 bangumi 外链里查出 3 条错配、
-// 在 193 条 musicbrainz 外链里查出 25 首歌挂了所属专辑的 release-group id 与 1 条死链。
+// 外部标识审计（只读）：检查当前外链的可访问性、对象类型与题名线索。
+// 同名命中不确认身份；报告始终保留 identity_verified=false，供逐条阅读核对。
 //
 // 用法：
 //   node mf-audit-external-links.ts --provider musicbrainz [--limit N]
@@ -66,37 +63,77 @@ const MB_ORDER = (e) => {
 // 公司/厂牌类 agent 的标签线索
 const looksLikeOrg = (e) => (e.attributes?.tags ?? []).some((t) => /organization|label|company|レコード会社|出版社|制作/i.test(String(t)));
 
-export async function checkMusicBrainz(entity, id, { lookup = fetchJSON, pace = sleep }: Record<string, any> = {}) {
-  const order = looksLikeOrg(entity) ? ["label", "artist"] : MB_ORDER(entity);
+const MB_LINK_TYPES = { musicbrainz: null, musicbrainz_release: "release", recording_mbid: "recording" };
+const BANGUMI_ROUTES = {
+  bangumi: ["subject", "subjects"], bangumi_person: ["person", "persons"],
+  bangumi_character: ["character", "characters"], bangumi_ep: ["ep", "episodes"], bangumi_episode: ["ep", "episodes"],
+};
+const PROVIDER_KINDS = { musicbrainz: Object.keys(MB_LINK_TYPES), bangumi: Object.keys(BANGUMI_ROUTES) };
+
+export function selectAuditLinks(entity, provider) {
+  return (Array.isArray(entity.external_links) ? entity.external_links : [])
+    .filter((link) => PROVIDER_KINDS[provider].includes(link.kind));
+}
+
+function auditTarget(link, provider): { id?: string; type?: string; error?: string; unknown?: boolean } {
+  try {
+    const url = new URL(link.url);
+    const hosts = provider === "musicbrainz" ? ["musicbrainz.org", "www.musicbrainz.org"] : ["bgm.tv", "bangumi.tv", "chii.in"];
+    const [, type, rawId] = url.pathname.split("/");
+    if (!["http:", "https:"].includes(url.protocol) || !hosts.includes(url.hostname)) return { error: "外链域名与提供方不一致" };
+    const id = String(rawId || "").toLowerCase();
+    const pattern = provider === "musicbrainz" ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/ : /^\d+$/;
+    if (!pattern.test(id)) return { error: "URL 缺少有效外部 ID" };
+    if (link.external_id && String(link.external_id).trim().toLowerCase() !== id) return { error: "external_id 与 URL 中的 ID 不一致" };
+    const expected = provider === "musicbrainz" ? MB_LINK_TYPES[link.kind] : BANGUMI_ROUTES[link.kind]?.[0];
+    if (expected && type !== expected) return { error: "外链类型与 URL 路径不一致" };
+    if (provider === "musicbrainz" && !["artist", "label", "release", "release-group", "recording", "work"].includes(type)) return { error: "尚未支持该 MusicBrainz 对象类型", unknown: true };
+    return { id, type };
+  } catch {
+    return { error: "外链 URL 无效" };
+  }
+}
+
+export async function checkMusicBrainz(entity, link, { lookup = fetchJSON, pace = sleep }: Record<string, any> = {}) {
+  const target = auditTarget(link, "musicbrainz");
+  if (target.error) return { ok: target.unknown ? null : false, identity_verified: false, why: target.error };
+  const order = [...new Set([target.type, ...(looksLikeOrg(entity) ? ["label", "artist"] : MB_ORDER(entity))])];
   let found = null, mtype = null;
   const unknownStatuses = [];
   for (const t of order) {
-    const r = await lookup(`https://musicbrainz.org/ws/2/${t}/${encodeURIComponent(id)}?fmt=json`);
-    if (r.status === 200) { found = r.json; mtype = t; break; }
+    const r = await lookup(`https://musicbrainz.org/ws/2/${t}/${target.id}?fmt=json`);
+    if (r.status === 200 && r.json && typeof r.json === "object" && !Array.isArray(r.json)) { found = r.json; mtype = t; break; }
     if (r.status !== 404) unknownStatuses.push(r.status);
     await pace(1100); // MB 限流 ~1 req/s
   }
   if (!found && unknownStatuses.length) return { ok: null, identity_verified: false, matchedType: null, why: "候选类型读取未完成", unknownStatuses };
   if (!found) return { ok: false, identity_verified: false, matchedType: null, why: "全部已检查候选类型返回 404" };
-  const names = [found.name, found.title, ...(found.aliases ?? []).map((a) => a.name)].filter(Boolean);
-  return { ok: titleMatch(entity.title, names), identity_verified: false, matchedType: mtype, mbName: found.name ?? found.title, candidates: names };
+  const names = [found.name, found.title, ...(Array.isArray(found.aliases) ? found.aliases : []).map((a) => a.name)].filter(Boolean);
+  if (!names.length) return { ok: null, identity_verified: false, matchedType: mtype, why: "来源缺少可核对题名" };
+  const typeMatches = target.type === mtype;
+  return { ok: typeMatches && titleMatch(entity.title, names), identity_verified: false, matchedType: mtype, urlType: target.type,
+    mbName: found.name ?? found.title, candidates: names, ...(!typeMatches ? { why: "URL 对象类型与实际对象类型不一致" } : {}) };
 }
 
 // ── bangumi：条目 name / name_cn / 别名 ──
-export async function checkBangumi(entity, id, { lookup = fetchJSON }: Record<string, any> = {}) {
-  const resource = entity.kind === "agent" ? (entity.attributes?.tags?.includes("character") ? "characters" : "persons") : "subjects";
-  const r = await lookup(`https://api.bgm.tv/v0/${resource}/${encodeURIComponent(id)}`);
+export async function checkBangumi(entity, link, { lookup = fetchJSON }: Record<string, any> = {}) {
+  const target = auditTarget(link, "bangumi");
+  if (target.error) return { ok: false, identity_verified: false, why: target.error };
+  const resource = BANGUMI_ROUTES[link.kind][1];
+  const r = await lookup(`https://api.bgm.tv/v0/${resource}/${target.id}`);
   if (r.status !== 200) return { ok: r.status === 404 ? false : null, identity_verified: false, matchedType: resource, why: `HTTP ${r.status}` };
-  const aliases = (r.json.infobox ?? [])
+  if (!r.json || typeof r.json !== "object" || Array.isArray(r.json)) return { ok: null, identity_verified: false, matchedType: resource, why: "来源响应形状无效" };
+  const aliases = (Array.isArray(r.json.infobox) ? r.json.infobox : [])
     .filter((b) => /别名|alias/i.test(String(b.key)))
     .flatMap((b) => (Array.isArray(b.value) ? b.value.map((v) => v.v ?? v) : [b.value]));
   const names = [r.json.name, r.json.name_cn, ...aliases].filter(Boolean);
+  if (!names.length) return { ok: null, identity_verified: false, matchedType: resource, why: "来源缺少可核对题名" };
   return { ok: titleMatch(entity.title, names), identity_verified: false, matchedType: resource, mbName: r.json.name, candidates: names };
 }
 
 const PROVIDERS = {
-  musicbrainz: { key: "musicbrainz", check: checkMusicBrainz, pacing: 1100 },
-  bangumi: { key: "bangumi", check: checkBangumi, pacing: 400 },
+  musicbrainz: { check: checkMusicBrainz, pacing: 1100 },
+  bangumi: { check: checkBangumi, pacing: 400 },
 };
 const P = PROVIDERS[PROVIDER];
 if (!P) { console.error(`不支持的 provider：${PROVIDER}（可选 ${Object.keys(PROVIDERS).join(" / ")}）`); process.exit(2); }
@@ -107,23 +144,21 @@ const rows = [];
 for (const kind of KINDS) {
   const items = await listKind(kind);
   for (const it of items) {
-    const v = (Array.isArray(it.external_links) ? it.external_links : [])
-      .find((link) => link.kind === P.key)?.external_id
-      || (Array.isArray(it.external_links) ? it.external_links : [])
-      .find((link) => link.kind === P.key)?.url;
-    if (v) rows.push({ kind, id: it.id, title: it.title, ext: String(v), attributes: it.attributes ?? {} });
+    for (const link of selectAuditLinks(it, PROVIDER)) {
+      rows.push({ kind, id: it.id, title: it.title, ext: link.external_id || link.url, link, attributes: it.attributes ?? {} });
+    }
   }
   await sleep(80);
 }
 const sample = LIMIT > 0 ? rows.slice(0, LIMIT) : rows;
-console.log(`provider=${PROVIDER} 带该外链的实体：${rows.length}，本次核验 ${sample.length}`);
+console.log(`provider=${PROVIDER} 待核验外链：${rows.length}，本次核验 ${sample.length}`);
 
 const problems = [];
 const unknown = [];
 let ok = 0;
 for (let i = 0; i < sample.length; i += 1) {
   const e = sample[i];
-  const r = await P.check(e, e.ext);
+  const r = await P.check(e, e.link);
   if (r.ok === null) unknown.push({ ...e, ...r });
   else if (r.ok) ok += 1;
   else problems.push({ ...e, ...r, why: r.why ?? "题名不匹配" });
