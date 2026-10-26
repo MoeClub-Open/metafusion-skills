@@ -370,6 +370,20 @@ test("fetchAniListMedia posts GraphQL and maps fixture", async () => {
   assert.match(out.rights_note, /版权方官方页/);
 });
 
+test("fetchAniListMedia keeps explicit media types ahead of defaults", async () => {
+  for (const [input, type, expected] of [
+    ["https://anilist.co/manga/123", "ANIME", "MANGA"],
+    [{ id: 123, type: "MANGA" }, "ANIME", "MANGA"],
+    [{ id: 123 }, "MANGA", "MANGA"],
+    ["123", "MANGA", "MANGA"],
+  ] as const) {
+    const fetchImpl = stubFetch([{ match: "graphql.anilist.co", body: { data: { Media: null } } }]);
+    const out = await fetchAniListMedia(input, { fetchImpl, type });
+    assert.equal(JSON.parse(fetchImpl.calls[0].body).variables.type, expected);
+    assert.equal(out.human_page, `https://anilist.co/${expected.toLowerCase()}/123`);
+  }
+});
+
 test("fetchAniListMedia maps GraphQL 404 to found:false", async () => {
   const fetchImpl = stubFetch([{ match: "graphql.anilist.co", status: 404, body: readJson("anilist-notfound.json") }]);
   const out = await fetchAniListMedia({ id: 999999999, type: "ANIME" }, { fetchImpl });

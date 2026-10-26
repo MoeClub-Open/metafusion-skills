@@ -1223,7 +1223,7 @@ export async function searchTmdb(query, opts) {
 const ANILIST_MEDIA_QUERY = "query($id:Int,$type:MediaType){Media(id:$id,type:$type){id type title{romaji english native} genres coverImage{large medium color} bannerImage startDate{year month day} endDate{year month day} synonyms episodes format status season description siteUrl studios{edges{node{name}}}}}";
 const ANILIST_SEARCH_QUERY = "query($s:String!,$p:Int,$l:Int,$type:MediaType){Page(page:$p,perPage:$l){pageInfo{total perPage hasNextPage} media(search:$s,type:$type){id type title{romaji english native} genres coverImage{large} startDate{year month day} format status season siteUrl}}}";
 
-/** 接受 1 / https://anilist.co/anime/20757/xxx / { id, type }。 */
+/** 接受数字 ID 或 AniList 页面 URL；URL 中的媒介类型优先。 */
 export function normalizeAniListId(input, defaultType) {
   const text = String(input == null ? "" : input).trim();
   const m = text.match(/anilist\.co\/(anime|manga)\/(\d+)/i);
@@ -1304,9 +1304,9 @@ async function anilistGql(query, variables, opts) {
 export async function fetchAniListMedia(idOrUrl, opts) {
   const o = opts || {};
   const parsed = (idOrUrl && typeof idOrUrl === "object" && idOrUrl.id)
-    ? { id: Number(idOrUrl.id), type: String(idOrUrl.type || "ANIME").toUpperCase() }
+    ? { id: Number(idOrUrl.id), type: String(idOrUrl.type || o.type || "ANIME").toUpperCase() }
     : normalizeAniListId(idOrUrl, o.type);
-  const type = o.type ? String(o.type).toUpperCase() : parsed.type;
+  const type = parsed.type;
   const res = await anilistGql(ANILIST_MEDIA_QUERY, { id: parsed.id, type: type }, o);
   const pageUrl = "https://anilist.co/" + type.toLowerCase() + "/" + parsed.id;
   if (res.notFound) {
