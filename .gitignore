@@ -13,6 +13,7 @@ __pycache__/
 /.tmp*/
 /.tmp*
 /tmp-*
+/tmp/
 /tasks/
 /test.txt
 /otome_id.json
