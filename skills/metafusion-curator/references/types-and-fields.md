@@ -74,10 +74,12 @@ title、original_language、translations、attributes、external_links、picture
 
 `tags` 的音乐建议词包括 `pop`、`j_pop`、`jazz`、`hip_hop`、`electronic`、`alternative`、`rnb`、`children_music`、`spoken_word`、`asmr` 等，以实例 definitions 为准。这些是建议词，不是白名单；来源给出的实际题材可以用自由标签保留，不能因词表缺项就退化为只写 album，也不能根据常识或题名补造题材。
 
-主体可用 `birth_date`、`death_date`、`formation_date`、`dissolution_date`、`occupations`（字符串数组）及 `activity_periods`（`[{begin?,end?}]`）。日期默认含年份；只有字段声明 `allow_yearless:true` 时可用 `--MM-DD`，出生日期种子已启用该能力。职业与活动期描述主体自身，具体作品职责仍是关系，不能互相替代。新增字段与词项须由实例内容 seed 或管理操作真正发布后才能使用。
-
 **纯字符串数组**（不是对象、不是词项码）：`["动画","剧场版"]`。当前种子允许八种 kind 写该字段。
 `GET /api/catalog/tags` 是对它的频次聚合，不是可写的字典表。
+
+### 主体常用属性
+
+主体（`agent`）常用 `birth_date`、`death_date`、`formation_date`、`dissolution_date`、`occupations`（字符串数组）及 `activity_periods`（`[{begin?,end?}]`），实际可写范围以当前 definitions 为准。日期默认含年份；只有字段声明 `allow_yearless:true` 时可用 `--MM-DD`（默认种子的 `birth_date` 已启用）。职业与活动期描述主体自身，在具体作品中的职责仍走语义关系，不能互相替代。新增字段与词项须由实例内容 seed 或管理操作发布后才能使用。
 
 ### `locator`
 
@@ -110,21 +112,15 @@ title、original_language、translations、attributes、external_links、picture
 
 ## `external_links`
 
-键必须来自 `GET /api/catalog/external-databases` 的实际返回；外部库可由后台扩展，不以固定数量为准。未注册的键报
-`invalid_external_id`。预设带 `category`（`all` / `work` / `release` / `agent`）与校验正则，常见四条：
+`external_links` 是对象数组 `[{kind, url, external_id?, role?}]`（不再使用旧版键值对象 `external_ids`）：
 
-- `official_website`：**存完整 URL**（`url_pattern` 是 `{id}`，值本身就是跳转链接，不做拼接），
-  校验只要求合法 http(s) URL；`category=all`，work / release / agent 等都可写；
-- `musicbrainz`：36 位 UUID（同一码被 work / release-group / recording 复用，**无语义区分**）；
-- `bangumi`：纯数字；
-- `isrc`：12 位码（独立码）。
+- `kind`：必填，取自 `GET /api/catalog/external-databases` 当前启用预设的 `code`（外部库可由后台扩展，不假设固定清单）。未知平台码报 `invalid_external_key: <码>`；预设 `category` 不为 `all` 且与实体 `kind` 不符时报 `invalid_external_category: <码>`（例如 `steam` 仅限 `work`，写到 `release` 会被拒）。
+- `url`：必填，须为绝对 HTTP(S) URL；无网页地址的纯编号（如 ISBN、ISRC、JAN/EAN）使用 `mf://external/<kind>/<经过路径编码的external_id>`，同时填写 `external_id`。空值、非法地址或同一实体内重复 `kind + url` 报 `invalid_external_link` / `duplicate_external_link`。
+- `external_id`：可选，填写时按预设 `validation_regex` 校验（如 `musicbrainz` 36 位 UUID、`bangumi` 纯数字、`isrc` 12 位码），不匹配报 `invalid_external_id: <码>`。`official_website` / `publisher_website` 直接校验完整 HTTP(S) `url`。
+- `role`：可选，允许 `official` / `primary` / `secondary` / `operator`（非法值报 `invalid_external_link_role`）。界面「官方」徽标仅由 `role="official"` 决定，不按平台码自动推断。
 
-**官网是"外部资料"面板的正式字段，不是只进 `sources` 的旁证。** 核到作品 / 发行 / 主体的官方站点后，
-把它写进 `external_links` 中 `kind="official_website"` 的 `url`：前端按 `sort_order`
-把官网排在面板首位并做"官方"高亮。只留在 `sources` 里页面不会出现任何官网入口——
-症状是"条目有 Wikipedia / Bangumi / Steam，却没有一条官方链接"。
+核实到作品、发行或主体的官方网站后，应写入 `external_links`（如 `{"kind":"official_website","url":"https://...","role":"official"}`），不要只留在修订说明或图片/收录 `sources` 中，否则详情页外部链接区不会展示官网入口。
 
-`steam` 预设的 category 是 `work`：写到 release 上会 400 `invalid_external_category`。
 搜索结果仅覆盖当前调用者可见实体；entity 引用还受目标状态、kind 和公开实体引用约束影响，搜索命中不保证引用可写。
 
 ## 写错时的错误码
@@ -135,7 +131,7 @@ title、original_language、translations、attributes、external_links、picture
 | 枚举值不在词表 | `invalid_term`（可能带字段前缀） | 用词项代码，不提交显示名 |
 | 组字段写了未声明的子键 | `unknown_field: <键>`（可能带前缀如 `locator: `） | 只写当前定义声明且启用的子字段 |
 | `locator` 有子字段无锚点 | `anchor_required: relative_to` | 补 `relative_to` |
-| 外部 ID 键未注册 | `invalid_external_id` | 先读 `/api/catalog/external-databases` |
+| 外链平台码、分类或格式错误 | `invalid_external_key: <码>` / `invalid_external_category: <码>` / `invalid_external_link` / `invalid_external_id: <码>` | 先读 `/api/catalog/external-databases` 核启用平台码、适用 category 与正则，`url` 填绝对 HTTP(S) 或 `mf://external/<kind>/<id>` |
 | 翻译形状/长度不对 | `invalid_translation` / `invalid_locale` / `translation_too_long` | locale 必须是合法语言标签，`title` 非空且 ≤2000，`aliases` 单项 ≤500 |
 
 完整错误码表见 [API 错误码与修复动作](api-errors.md)。

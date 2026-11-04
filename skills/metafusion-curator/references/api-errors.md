@@ -18,6 +18,7 @@
 | `undeclared_release_subject` / `invalid_reference` / `constraint_violation` | 核收录、归属和目标可见性，同一副本补齐相关结构后再合入；不以近似关系规避 |
 | `invalid_relation_type` / `invalid_endpoints` / `relation_cycle` / `cardinality_exceeded` | 核关系定义、方向、范围和现有关系；反向展示不要求另建反向边 |
 | `invalid_source` / `invalid_picture` | 提供了元数据时修正其形状；来源本身可省略，不编造来源以通过校验 |
+| `invalid_external_key` / `invalid_external_category` / `invalid_external_link` / `invalid_external_id` | 读取 `/api/catalog/external-databases` 核启用平台码、适用实体 kind 与标识正则；确保每项提供合法 `url` |
 | `use_lifecycle_endpoint` | 已生效实体删除/身份合并是独立治理操作，不伪装成普通事实修改 |
 | `forbidden` / `authentication_required` / `invalid_token` | 分别核任务权限、登录和凭据 scopes；读接口可匿名成功，不证明令牌有效 |
 | `auth_unavailable` / `transaction_busy` | 依赖故障，遵守 Retry-After；先确定未知写结果，不通过更换令牌或新 ID 掩盖 |

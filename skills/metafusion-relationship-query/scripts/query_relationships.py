@@ -11,6 +11,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import UUID
 
 KINDS = ('agent', 'collection', 'work', 'content_unit', 'expression', 'release', 'medium', 'track')
+CLASSES = ('ownership', 'placement', 'inclusion', 'semantic', 'reference')
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -61,6 +62,7 @@ def main(argv=None):
     parser.add_argument('--rules', action='store_true', help='Read live relationship rules instead of querying entities')
     parser.add_argument('--id', action='append', default=[], dest='ids', help='Entity UUID; repeat for a batch')
     parser.add_argument('--direction', choices=['both', 'outgoing', 'incoming'], default='both')
+    parser.add_argument('--class', action='append', default=[], dest='classes', choices=CLASSES, help='Relationship class filter; repeat to combine')
     parser.add_argument('--rule-code', action='append', default=[])
     parser.add_argument('--peer-kind', action='append', default=[], choices=KINDS)
     parser.add_argument('--limit', type=int, default=25)
@@ -74,7 +76,7 @@ def main(argv=None):
         parser.error('--timeout must be between 1 and 120 seconds')
     if not 1 <= args.limit <= 100 or args.offset < 0:
         parser.error('--limit must be 1..100 and --offset must be nonnegative')
-    if args.rules and (args.ids or args.rule_code or args.peer_kind or args.direction != 'both' or args.offset):
+    if args.rules and (args.ids or args.classes or args.rule_code or args.peer_kind or args.direction != 'both' or args.offset):
         parser.error('--rules cannot be combined with entity-query filters')
     try:
         if args.rules:
@@ -90,6 +92,8 @@ def main(argv=None):
             except ValueError:
                 parser.error('--id must be a valid UUID')
             payload = {'ids': ids, 'direction': args.direction, 'limit': args.limit, 'offset': args.offset}
+            if args.classes:
+                payload['classes'] = unique(args.classes)
             if args.rule_code:
                 payload['rule_codes'] = unique(args.rule_code)
             if args.peer_kind:

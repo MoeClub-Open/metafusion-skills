@@ -25,6 +25,33 @@ test("links reader follows has_more and preserves publisher references and edita
   assert.notEqual(validatePlan({ action: "entity.relations", id: "publisher" }), null);
 });
 
+test("links reader forwards direction, classes, rule_codes and peer_kinds filters", async () => {
+  const calls: string[] = [];
+  const requestFn = async (path: string) => {
+    calls.push(path);
+    return {
+      status: 200,
+      body: { subject_id: "work-1", limit: 100, has_more: false, items: [], entities: { "work-1": { title: "Work" } } },
+    };
+  };
+  const plan = await runPlan(
+    {
+      action: "entity.links",
+      id: "work-1",
+      params: { direction: "outgoing", classes: ["semantic", "reference"], rule_codes: ["relation:credit"], peer_kinds: ["agent"] },
+    },
+    { requestFn },
+  );
+  assert.equal(plan.ok, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /direction=outgoing/);
+  assert.match(calls[0], /classes=semantic%2Creference/);
+  assert.match(calls[0], /rule_codes=relation%3Acredit/);
+  assert.match(calls[0], /peer_kinds=agent/);
+  assert.ok(calls[0].endsWith("offset=0"));
+  assert.equal(validatePlan({ action: "entity.links", id: "work-1", params: { classes: ["bad"] } }), "invalid_link_params");
+});
+
 test("links reader reports later-page failure without returning a complete graph", async () => {
   await assert.rejects(readEntityLinks("publisher", { requestFn: async (path: string) => path.endsWith("offset=0")
     ? { status: 200, body: { subject_id: "publisher", limit: 100, items: [], entities: {}, has_more: true } }

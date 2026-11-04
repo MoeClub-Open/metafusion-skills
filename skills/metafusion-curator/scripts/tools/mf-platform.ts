@@ -2,8 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { CatalogEntity } from "../metafusion-api.ts";
-import { readEntityLinks } from "./mf-links.ts";
+import type { CatalogEntity, RequestOptions } from "../metafusion-api.ts";
+import { readEntityLinks, validateLinkParams } from "./mf-links.ts";
 import {
   request as apiRequest,
   collectPages,
@@ -12,6 +12,7 @@ import {
 
 const ACTIONS = [
   "entity.get",
+  "entity.batch",
   "entity.list",
   "entity.stats",
   "entity.resolve",
@@ -23,7 +24,7 @@ const ACTIONS = [
   "contract",
 ];
 const FILTERS = new Set(
-  "kind kinds q state work_id content_unit_id release_id medium_id parent_id field value tags original_language has_pictures sort order locale".split(
+  "id ids kind kinds q state work_id content_unit_id release_id medium_id parent_id field value tags tags_mode original_language has_pictures sort order locale".split(
     " ",
   ),
 );
@@ -53,7 +54,11 @@ export function schemaFor(action?: string) {
     additionalProperties: false,
     required: [
       "action",
-      ...(["definitions", "contract", "entity.list", "entity.stats"].includes(a) ? [] : ["id"]),
+      ...(["definitions", "contract", "entity.list", "entity.stats"].includes(a)
+        ? []
+        : a === "entity.batch"
+          ? ["ids"]
+          : ["id"]),
     ],
     properties: {
       action: { const: a },
@@ -70,6 +75,29 @@ export function schemaFor(action?: string) {
               },
               limit: { type: "integer", minimum: 1, maximum: 100 },
             }
+          : a === "entity.batch"
+            ? {
+                ids: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 100,
+                  items: { type: "string", minLength: 1 },
+                },
+              }
+            : a === "entity.links"
+              ? {
+                  id: { type: "string", minLength: 1 },
+                  params: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      direction: { enum: ["both", "outgoing", "incoming"] },
+                      classes: {},
+                      rule_codes: {},
+                      peer_kinds: {},
+                    },
+                  },
+                }
           : { id: { type: "string", minLength: 1 } }),
     },
   });
@@ -82,6 +110,10 @@ export function validatePlan(plan) {
   const allowed =
     plan.action === "entity.list"
       ? ["action", "params", "limit"]
+      : plan.action === "entity.batch"
+        ? ["action", "ids"]
+        : plan.action === "entity.links"
+          ? ["action", "id", "params"]
       : ["definitions", "contract", "entity.stats"].includes(plan.action)
         ? ["action"]
         : ["action", "id"];
@@ -92,6 +124,19 @@ export function validatePlan(plan) {
     !(typeof plan.id === "string" && plan.id.trim())
   )
     return "invalid_plan";
+  if (plan.action === "entity.batch") {
+    if (
+      !Array.isArray(plan.ids) ||
+      plan.ids.length < 1 ||
+      plan.ids.length > 100 ||
+      plan.ids.some((id) => typeof id !== "string" || !id.trim())
+    )
+      return "invalid_batch_ids";
+  }
+  if (plan.action === "entity.links") {
+    const bad = validateLinkParams(plan.params);
+    if (bad) return bad;
+  }
   if (plan.action === "entity.list") {
     if (
       plan.params !== undefined &&
@@ -109,9 +154,9 @@ export function validatePlan(plan) {
 }
 const entityPath = (id, suffix = "") =>
   `/api/catalog/entities/${encodeURIComponent(id)}${suffix}`;
-async function read(requestFn, p) {
+async function read(requestFn, p, options: RequestOptions = { tries: 4 }) {
   try {
-    return await requestFn(p, { tries: 4 });
+    return await requestFn(p, options);
   } catch {
     return { status: 0, body: { error: "network" } };
   }
@@ -147,10 +192,27 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
   }
   if (plan.action === "entity.links") {
     try {
-      return { ok: true, outcome: "complete", data: await readEntityLinks(plan.id, { requestFn }) };
+      return { ok: true, outcome: "complete", data: await readEntityLinks(plan.id, { params: plan.params, requestFn }) };
     } catch (error) {
       return { ok: false, outcome: "partial", reason: String(error) };
     }
+  }
+  if (plan.action === "entity.batch") {
+    const ids = [...new Set(plan.ids.map((id: string) => id.trim()))];
+    const r = await read(requestFn, "/api/catalog/entities/batch", { method: "POST", body: { ids } });
+    if (r.status !== 200) return failure(r);
+    const valid =
+      record(r.body?.items) &&
+      Array.isArray(r.body?.missing) &&
+      Object.entries(r.body.items).every(([k, v]) => entity(v, k));
+    return valid
+      ? {
+          ok: true,
+          outcome: "complete",
+          data: r.body,
+          visibilityScope: "current caller-visible response",
+        }
+      : { ok: false, outcome: "partial", reason: "response_shape_invalid" };
   }
   const paths = {
     "entity.stats": "/api/catalog/stats",
@@ -216,7 +278,7 @@ export async function runPlan(plan, { requestFn = apiRequest }: Record<string, a
     : { ok: false, outcome: "partial", reason: "response_shape_invalid" };
 }
 export function helpText() {
-  return "mf-platform list | schema [action] | --plan plan.json [--out result.json]\n只读目录查询；总量与封面/标签覆盖使用 entity.stats。entity.list 会遍历全部匹配结果，limit 是每页数量。编辑使用 mf-workspace init/checkout/stage/commit/push。";
+  return "mf-platform list | schema [action] | --plan plan.json [--out result.json]\n只读目录查询；总量与封面/标签覆盖用 entity.stats，已知 1–100 个 ID 批量水合用 entity.batch，关联读取可用 entity.links 的 params.classes 裁剪分支。entity.list 会遍历全部匹配结果，limit 是每页数量。编辑使用 mf-workspace init/checkout/stage/commit/push。";
 }
 export async function runCli(
   argv = process.argv.slice(2),

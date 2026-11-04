@@ -42,6 +42,10 @@ test("closed read plan schema rejects arbitrary methods and filter pagination", 
     null,
   );
   assert.equal(
+    validatePlan({ action: "entity.list", params: { ids: "a,b", tags_mode: "all" } }),
+    null,
+  );
+  assert.equal(
     validatePlan({ action: "entity.list", params: { status: "published" } }),
     "invalid_list_params",
   );
@@ -58,6 +62,31 @@ test("closed read plan schema rejects arbitrary methods and filter pagination", 
     "invalid_limit",
   );
   assert.equal(schemaFor("entity.get").additionalProperties, false);
+});
+test("entity.batch validates 1-100 IDs and verifies returned entity keys", async () => {
+  assert.equal(validatePlan({ action: "entity.batch", ids: [] }), "invalid_batch_ids");
+  assert.equal(
+    validatePlan({ action: "entity.batch", ids: Array.from({ length: 101 }, (_, i) => `id-${i}`) }),
+    "invalid_batch_ids",
+  );
+  let captured: any = null;
+  const res = await runPlan(
+    { action: "entity.batch", ids: [entity.id, entity.id, "missing-id"] },
+    {
+      requestFn: async (p, opts) => {
+        captured = { p, opts };
+        return {
+          status: 200,
+          body: { items: { [entity.id]: entity }, missing: ["missing-id"] },
+        };
+      },
+    },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(captured.p, "/api/catalog/entities/batch");
+  assert.equal(captured.opts.method, "POST");
+  assert.deepEqual(captured.opts.body, { ids: [entity.id, "missing-id"] });
+  assert.deepEqual(res.data.missing, ["missing-id"]);
 });
 test("GET verifies identity and canonical state", async () => {
   assert.equal(

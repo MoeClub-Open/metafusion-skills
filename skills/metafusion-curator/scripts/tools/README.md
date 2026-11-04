@@ -35,6 +35,8 @@ init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本�
 
 计数或看图片/标签覆盖用 `mf-platform` 计划 `{"action":"entity.stats"}`；`entity.list` 会遍历全部匹配结果，limit 只是页大小。stage 文件接受操作数组或 `{operations:[…]}`；缺失 create ref 自动补名，成功结果在 `result.refs` 返回 UUID、`workspace.version` 返回新版本。创建/checkout 每次最多 100 个实体与关系，stage 每次最多 100 个操作，可分次保存后统一 commit。多行提交说明用 `commit --message-file message.txt`，或 `--message-file -` 从标准输入读取。
 
+批量读取与定向查询：已知 1–100 个实体 UUID 时用 `{"action":"entity.batch","ids":[...]}` 一次取回完整实体、`covers` 与 `missing`；关键词检索顶层对象时在 `entity.list` 的 `params` 中传 `kinds:"work,release,agent,collection"`；只看某类关联时在 `entity.links` 传 `params:{classes:["semantic","reference"]}` 跳过无关结构表扫描。
+
 `mf-track-content` 计划是 `{workspace_id,expected_version,track_id,inclusion}`，expected_version 是副本版本；默认预览不写，`--apply` 仅暂存收录，不自动提交或合入。
 
 `mf-merge` 前置事实整理通过服务器副本合入，只有 applied=true 才继续生命周期合并；部分成功不盲目重跑。定义、身份合并和文件操作各有独立权限，不能声称跨服务事务。
