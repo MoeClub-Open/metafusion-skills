@@ -29,6 +29,10 @@ test("一次候选查询查基础题名、翻译、别名与规范化空白；�
   assert.equal(report.candidates[0].matched_reasons[0].matched_field, "translations.ja.aliases[0]");
   assert.equal(report.candidates[0].matched_reasons[0].strength, "weak_title_candidate");
   assert.equal(report.identity_confirmed, false);
+
+  const nonofficialItem = entity("w2", { title: "Orig", translations: { "zh-CN": { title: "Orig", nonofficial_aliases: ["社区通称"] } } });
+  const nonofficialReport = await findIdentity({ titles: ["社区通称"], requestFn: query(response([nonofficialItem])) });
+  assert.equal(nonofficialReport.candidates[0].matched_reasons[0].matched_field, "translations.zh-CN.nonofficial_aliases[0]");
 });
 
 test("同名候选分别保留，canonical 汇聚保留原始 ID 与理由", async () => {

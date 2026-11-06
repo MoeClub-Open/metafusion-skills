@@ -17,6 +17,7 @@ Release：具体发行，经 subjects 声明 Work
 ```
 
 Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文件、哈希、对象键与下载地址属于 [存储服务](file-upload.md)，不写入创作题名或目录属性。
+Agent 子类型通过 `attributes.agent_type`（受控词表 `person` / `group` / `organization` / `character`）表达。Release 读取响应附带只读聚合 `medium_formats`（按活动子 `medium` 汇总 `format` 频次），不落库、不进快照。
 
 ## 归属与收录
 

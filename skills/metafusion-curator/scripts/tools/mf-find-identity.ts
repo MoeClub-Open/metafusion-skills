@@ -123,6 +123,16 @@ function entityTitleValues(entity: Record<string, any>) {
         }
       });
     }
+    if (Array.isArray(translation?.nonofficial_aliases)) {
+      translation.nonofficial_aliases.forEach((value, index) => {
+        if (typeof value === "string") {
+          values.push({
+            field: "translations." + locale + ".nonofficial_aliases[" + index + "]",
+            value,
+          });
+        }
+      });
+    }
   }
   return values;
 }

@@ -297,7 +297,7 @@ test("request 遮盖 fetch 异常详情中的 PAT", async () => {
 });
 
 test("writableEntity 保留完整可写实体并剔除只读投影", () => {
-  const writable = writableEntity(currentEntity());
+  const writable = writableEntity({ ...currentEntity(), medium_formats: { cd: 2 } });
   assert.deepEqual(writable.translations["en-US"], {
     title: "Example",
     summary: "Official summary",
@@ -305,4 +305,5 @@ test("writableEntity 保留完整可写实体并剔除只读投影", () => {
   assert.deepEqual(writable.attributes, { language: "en" });
   assert.equal(writable.created_by, undefined);
   assert.equal(writable.updated_at, undefined);
+  assert.equal(writable.medium_formats, undefined);
 });

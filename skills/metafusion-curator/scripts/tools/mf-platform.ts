@@ -24,7 +24,7 @@ const ACTIONS = [
   "contract",
 ];
 const FILTERS = new Set(
-  "id ids kind kinds q state work_id content_unit_id release_id medium_id parent_id field value tags tags_mode original_language has_pictures sort order locale".split(
+  "id ids kind kinds q state work_id content_unit_id release_id medium_id parent_id field value values exclude_field exclude_values tags tags_mode original_language has_pictures sort order locale".split(
     " ",
   ),
 );

@@ -137,7 +137,7 @@ POST /api/catalog/workspaces/{id}/rebase
 | track | 必须 medium_id，可有同 Medium 的 parent_id；contents 引用 Expression |
 
 - title 保存对象自身名称。Work 只写作品名，Release 原样保存发行方的版本名称；不自行添加 `[CD]`、品番或“初版”等后缀。
-- translations 是 `{locale:{title,summary?,body?,aliases?}}`，原语言内容也可满足语言资料要求。没有官方中文译名时不补造。
+- translations 是 `{locale:{title,nonofficial?,summary?,body?,aliases?,nonofficial_aliases?}}`，原语言内容也可满足语言资料要求。没有官方中文译名时不补造正式译名；社区通行译名须在非原始语言设 `nonofficial:true` 或写入 `nonofficial_aliases`。
 - attributes 使用当前适用于 kind 的字段；枚举填词项 code。外部标识是 `external_links:[{kind,url,external_id?}]`，不是旧 external_ids 对象。
 - subjects 是 `[{work_id,role,position,attributes?}]`。Track.contents 是 `[{expression_id,position,locator,attributes?,sources?}]`，收录来源可省略。
 - Relation document 是 `{type,source_id,target_id,attributes?}`；两端 kind、方向和属性由 definitions.document.relations 决定。

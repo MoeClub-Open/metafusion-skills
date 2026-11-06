@@ -46,6 +46,13 @@ test("closed read plan schema rejects arbitrary methods and filter pagination", 
     null,
   );
   assert.equal(
+    validatePlan({
+      action: "entity.list",
+      params: { field: "creation_form", values: "anime_tv,anime_movie", exclude_field: "creation_form", exclude_values: "song" },
+    }),
+    null,
+  );
+  assert.equal(
     validatePlan({ action: "entity.list", params: { status: "published" } }),
     "invalid_list_params",
   );

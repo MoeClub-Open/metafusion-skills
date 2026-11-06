@@ -98,6 +98,7 @@ const READ_ONLY_ENTITY_FIELDS = new Set([
   "created_by",
   "redirect_id",
   "updated_at",
+  "medium_formats",
 ]);
 
 let credentials;

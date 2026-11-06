@@ -17,7 +17,7 @@
 
 ## 实体字段与动态属性
 
-title、original_language、translations、attributes、external_links、pictures、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](api-templates.md)。state、review_status、created_by、updated_at、redirect_id 是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
+title、original_language、translations、attributes、external_links、pictures、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](api-templates.md)。state、review_status、created_by、updated_at、redirect_id 以及发行版（`kind=release`）读取时按活动子载体聚合的 `medium_formats`（`Record<string, number>`，写入副本时自动剥离）都是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
 
 两个易错点：
 
@@ -79,7 +79,7 @@ title、original_language、translations、attributes、external_links、picture
 
 ### 主体常用属性
 
-主体（`agent`）常用 `birth_date`、`death_date`、`formation_date`、`dissolution_date`、`occupations`（字符串数组）及 `activity_periods`（`[{begin?,end?}]`），实际可写范围以当前 definitions 为准。日期默认含年份；只有字段声明 `allow_yearless:true` 时可用 `--MM-DD`（默认种子的 `birth_date` 已启用）。职业与活动期描述主体自身，在具体作品中的职责仍走语义关系，不能互相替代。新增字段与词项须由实例内容 seed 或管理操作发布后才能使用。
+主体（`agent`）支持受控词表字段 `agent_type`（词项：`person` 个人、`group` 团体/组合、`organization` 机构/公司、`character` 虚构角色，驱动 `agent_person` / `agent_group` / `agent_organization` / `agent_character` 细分模板与列表分面）以及 `birth_date`、`death_date`、`formation_date`、`dissolution_date`、`occupations`（字符串数组）与 `activity_periods`（`[{begin?,end?}]`），实际可写范围以当前 definitions 为准。日期默认含年份；只有字段声明 `allow_yearless:true` 时可用 `--MM-DD`（默认种子的 `birth_date` 已启用）。职业与活动期描述主体自身，在具体作品中的职责仍走语义关系，不能互相替代。新增字段与词项须由实例内容 seed 或管理操作发布后才能使用。
 
 ### `locator`
 
@@ -132,6 +132,6 @@ title、original_language、translations、attributes、external_links、picture
 | 组字段写了未声明的子键 | `unknown_field: <键>`（可能带前缀如 `locator: `） | 只写当前定义声明且启用的子字段 |
 | `locator` 有子字段无锚点 | `anchor_required: relative_to` | 补 `relative_to` |
 | 外链平台码、分类或格式错误 | `invalid_external_key: <码>` / `invalid_external_category: <码>` / `invalid_external_link` / `invalid_external_id: <码>` | 先读 `/api/catalog/external-databases` 核启用平台码、适用 category 与正则，`url` 填绝对 HTTP(S) 或 `mf://external/<kind>/<id>` |
-| 翻译形状/长度不对 | `invalid_translation` / `invalid_locale` / `translation_too_long` | locale 必须是合法语言标签，`title` 非空且 ≤2000，`aliases` 单项 ≤500 |
+| 翻译形状/长度不对 | `invalid_translation` / `invalid_locale` / `translation_too_long` | locale 必须是合法语言标签，`title` 非空且 ≤2000，`nonofficial` 仅非原始语种允许为 true，`aliases` 与 `nonofficial_aliases` 单项 ≤500 |
 
 完整错误码表见 [API 错误码与修复动作](api-errors.md)。
