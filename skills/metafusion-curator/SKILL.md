@@ -14,8 +14,10 @@ description: 查询和协作编辑 MetaFusion 目录实体、收录与署名关�
   **没人读过才是问题**。译名、职衔署名、关系端点、季归属这四类尤其要对着原文一行行看；读不到依据就留空并在提交说明里写明。
   抓取脚本与编辑脚本都按常规用，但不许把「抓取→生成→提交」接成没人看内容的自动管道。
 - 字段、词项与关系以目标实例的 OpenAPI、definitions 为准。层级和名称按[命名与建模](../lrm-catalog-standards/SKILL.md)；无官方中文译名时主标题保留原名，社区通行译名须显式标 `nonofficial` 或写入 `nonofficial_aliases`（见[来源说明](references/source-policy.md)）。
+- 按需裁剪查询字段以节省上下文：检索、批量读取、单条读取、关系查询、定义读取与外部源查询均支持可选字段/语种/属性键过滤（如 `fields`、`locales`、`attribute_keys`、`include_body`、`include_entities`、`include_raw`），只请求当前判断所需的字段。
 - 编辑流程为创建副本 → checkout → 多次 stage → commit → push。stage 与 commit 都不改变正式目录；免审用户 push 直接合入，其他用户生成 PR。一个副本可持续积累多次提交，协作者的提交各自署名。
 - 冲突时比较 base、current 与 proposed，通过 rebase 生成解决后的新提交；保留原作者，不覆盖他人改动。版本、提交 ID 与恢复见[协作流程](references/workflow.md)。
+- 任务完成或回合结束时，必须输出简洁完整的操作总结：列出涉及的 `/catalog/<id>` 实体链接、具体新增或修改的字段/译名/关系，以及最终合并（`applied=true`）或 PR 状态。
 
 ## 按需参考
 
