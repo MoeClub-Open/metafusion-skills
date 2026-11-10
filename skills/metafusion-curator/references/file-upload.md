@@ -4,6 +4,7 @@
 
 ## 上传与封面
 
+- 主站默认启用 `STORAGE_CATALOG_ASSETS_ONLY=true`，仅接收 `pictures[]` 位图（`image/jpeg`、`image/png`、`image/webp`、`image/avif`、`image/gif`），完成时核验文件头魔数（不符回 `415 unsupported_media_type`）；`initiate` 禁带 `target_entity_id`，公开 `bind`/`unbind` 或非 `cover_image` 用途回 `403 catalog_assets_only`。默认 `picture_role` 含 `key_visual`、`cover_art`、`back_cover`、`booklet`、`disc_art`、`obi`、`packaging`、`poster`、`character_portrait`、`person_portrait`、`logo`、`scene_still`（以实例 definitions 为准）。
 - 上传封面时 initiate 不传 target_entity_id；可传 binding_role=cover_image 说明用途。完成传输和 complete 后取得 asset_id，初始化成功不等于文件已完成。
 - 把 asset_id 与权威存储内容 URL（实例地址加 `/api/storage/assets/{asset_id}/content`）放入 pictures，经普通工作副本 stage、commit、push/PR merge 保存。stage 自动私有预留，不需要额外预留请求，不改变正式目录或公开封面。
 - 新引用资产须已完成、哈希验证且未封禁或回收；保存者须是上传者或当前具有 storage.asset.moderate 权限。图片 source 可选，已有真实来源保留；来源、存储绑定和转载许可是不同事实。
