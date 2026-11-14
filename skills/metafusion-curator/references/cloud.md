@@ -9,7 +9,7 @@
 | 契约、通用 API 与锁定手册 | `metafusion_api_contract`、`metafusion_api_call`（动态定义读 `/api/catalog/definitions`）、`metafusion_reference`（返回部署实际锁定的 revision） |
 | 检索与批量读取实体 | `metafusion_search`（顶层检索建议传 `kinds=work,release,agent,collection`；支持 `query.fields` 按需筛选返回字段，自动内联 `cover_url`）、`metafusion_entities_batch`（1–100 个 UUID 单次快照读取；支持可选 `fields`、`locales`、`attribute_keys`、`include_body` 按需裁剪） |
 | 关系分页与多跳图读取 | `metafusion_relationships`（每条关系边已内联 `peer_id`/`peer_kind`/`peer_title`，默认 `include_entities=false` 省略顶层重复 `entities` 字典）、`catalog_graph_read`（1–3 跳自动翻页合并；均支持 `classes`、`direction`、`rule_codes`、`peer_kinds` 裁剪） |
-| 查重候选与批量身份核查 | `metafusion_candidates`、`catalog_identity_check`（1–50 条批量查重；可选 `context` 仅调整置信度排序与 `reuse/review/distinct` 建议，不过滤同名候选） |
+| 查重候选与批量身份核查 | `metafusion_candidates`、`catalog_identity_check`（1–50 条批量查重；默认含 `core_title` 核心题名匹配 `title_core`，传 `include_approximate: true` 启用子串与 `pg_trgm` 近似召回 `title_similar`；主分类冲突标 `agent_type_mismatch`/`creation_form_mismatch`/`collection_type_mismatch` 并建议 `distinct`；可选 `context` 仅调整排序与置信度，从不过滤同名候选） |
 | 质量诊断与外部源只读查询 | `catalog_quality_audit`（1–100 个实体即时诊断，不阻塞编辑）、`external_source_query`（Bangumi/DLsite/DMM 只读查询，支持可选 `include_raw` 默认 `false` 省略重复原始载荷、`include_preview` 默认 `true`） |
 | 全网搜索、公开 HTTP 与 Wiki | `metafusion_web_search`、`metafusion_http_request`（不带平台凭据、不自动跟随重定向）、`metafusion_wiki`（Wikipedia/萌娘百科原文与许可） |
 
@@ -18,6 +18,8 @@
 ## 工作副本
 
 工具直接接收原生 DTO 字段；路径参数为 `workspace_id`、`pull_request_id` 或 `commit_id`，没有额外 body 包装。精确请求见[载荷](api-templates.md)。
+
+**新建前近似查重（Agent 硬规）**：通过 `metafusion_workspace_stage` 提交任何 `action: "create"` 实体前，Agent 必须先调用 `catalog_identity_check` 或 `metafusion_candidates` 并传 `include_approximate: true`（站内助手 `catalog_candidates` 在传入 `titles` 时默认 `include_approximate=true`；可同时传主分类 `attributes` 辅助冲突判定）。当返回 `reuse` 或 `review` 候选（含 `title_core` 与 `title_similar`）时，必须检查 `assessment` 并用 `metafusion_entities_batch` / `metafusion_relationships` 读取候选详情与关系，确认是复用既有 UUID 还是新建独立实体（如同名主打歌 `song` Work 与单曲/专辑 `single`/`original_album` Work）。
 
 | 操作 | MCP 工具 |
 | --- | --- |

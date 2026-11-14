@@ -14,6 +14,14 @@ const KINDS = new Set([
   "track",
 ]);
 const DEFAULT_LIMIT = 1000;
+const CORP_AFFIX_RE =
+  /^(?:株式会社|有限会社|合同会社|合資会社|一般社団法人|公益財団法人|\(株\)|\(有\)|㈱|㈲)\s*|\s*(?:株式会社|有限会社|合同会社|合資会社|一般社団法人|公益財団法人|\(株\)|\(有\)|㈱|㈲)$/gu;
+const CORP_EN_RE =
+  /(?:\s*,\s*|\s+)(?:co\.?,?\s*ltd\.?|inc\.?|corp\.?|corporation|ltd\.?|llc|gmbh)$/iu;
+const QUALIFIER_RE =
+  /\s*(?:[(]|\[|【)\s*(?:tv\s*anime|tvアニメ|テレビアニメ|アニメ|anime|劇場版|劇場|映画|movie|film|ova|ona|漫画|マンガ|manga|コミック|comic|小説|ライトノベル|novel|light\s*novel|ゲーム|game|シングル|single|アルバム|album|ep|ost|サウンドトラック|soundtrack|cd|bd|dvd|blu-?ray|lp|mv|pv|バンド|band|ユニット|unit|グループ|group|キャラクター|character)\s*(?:[)]|\]|】)$/iu;
+const CORE_STRIP_RE =
+  /[\x00-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F\u00A0-\u00BF\u2000-\u206F\u2E00-\u2E7F\u3000-\u3004\u3008-\u303A\u303D-\u303F\u30FB\uFE30-\uFE6F\uFF61-\uFF65]+/gu;
 
 function cleanText(value) {
   return String(value ?? "").trim();
@@ -21,6 +29,76 @@ function cleanText(value) {
 
 function normalizeTitle(value) {
   return cleanText(value).replace(/\s+/gu, " ").toLowerCase();
+}
+
+function foldFullwidthAscii(value: string) {
+  let out = "";
+  for (const ch of value) {
+    const cp = ch.codePointAt(0)!;
+    if (cp >= 0xff01 && cp <= 0xff5e) {
+      out += String.fromCodePoint(cp - 0xfee0);
+    } else if (cp === 0x3000) {
+      out += " ";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+export function coreTitle(value: unknown) {
+  const folded = cleanText(foldFullwidthAscii(String(value ?? "")))
+    .replace(/\s+/gu, " ")
+    .toLowerCase();
+  if (!folded) return "";
+  let cur = folded;
+  const noCorp = cur.replace(CORP_AFFIX_RE, "").trim();
+  if (noCorp) cur = noCorp;
+  const noEnCorp = cur.replace(CORP_EN_RE, "").trim();
+  if (noEnCorp) cur = noEnCorp;
+  const noQual = cur.replace(QUALIFIER_RE, "").trim();
+  if (noQual) cur = noQual;
+  const stripped = cur.replace(CORE_STRIP_RE, "");
+  return stripped || cur;
+}
+
+function coreTrigramSet(value: string) {
+  const runes = [..."  " + value + " "];
+  const out = new Set<string>();
+  for (let i = 0; i + 3 <= runes.length; i += 1) {
+    out.add(runes.slice(i, i + 3).join(""));
+  }
+  return out;
+}
+
+function coreTrigramSimilarity(a: string, b: string) {
+  const ta = coreTrigramSet(a);
+  const tb = coreTrigramSet(b);
+  if (!ta.size || !tb.size) return 0;
+  let shared = 0;
+  for (const k of ta) {
+    if (tb.has(k)) shared += 1;
+  }
+  const union = ta.size + tb.size - shared;
+  return union > 0 ? shared / union : 0;
+}
+
+function hasSimilarCore(queryCore: string, entityCore: string) {
+  const qRunes = [...queryCore];
+  const eRunes = [...entityCore];
+  if (qRunes.length < 2 || eRunes.length < 2) return false;
+  if (queryCore === entityCore) return true;
+  if (entityCore.includes(queryCore) || queryCore.includes(entityCore)) return true;
+  if (qRunes.length < 4 || eRunes.length < 4) return false;
+  if (coreTrigramSimilarity(queryCore, entityCore) >= 0.45) return true;
+  const [shortRunes, longRunes] =
+    qRunes.length <= eRunes.length ? [qRunes, eRunes] : [eRunes, qRunes];
+  const shortStr = shortRunes.join("");
+  for (let i = 0; i + shortRunes.length <= longRunes.length; i += 1) {
+    const slice = longRunes.slice(i, i + shortRunes.length).join("");
+    if (coreTrigramSimilarity(shortStr, slice) >= 0.45) return true;
+  }
+  return false;
 }
 
 function isScalar(value) {
@@ -41,6 +119,7 @@ function validateInput({
   releaseId,
   mediumId,
   limit = DEFAULT_LIMIT,
+  approximate = false,
 }: Record<string, any>) {
   if (!KINDS.has(kind)) throw new Error("kind 必须是八种实体 kind 之一");
   const normalizedWorkId = cleanText(workId);
@@ -91,6 +170,7 @@ function validateInput({
     releaseId: normalizedReleaseId || null,
     mediumId: normalizedMediumId || null,
     limit,
+    approximate: Boolean(approximate),
   };
 }
 
@@ -146,9 +226,11 @@ function addReason(reasons, reason) {
 function matchReasons(entity, query) {
   const reasons = [];
   const wantedTitles = query.titles.map(normalizeTitle);
+  const wantedCores = query.titles.map(coreTitle);
   for (const title of entityTitleValues(entity)) {
     const normalized = normalizeTitle(title.value);
     if (!normalized) continue;
+    const entityCore = coreTitle(title.value);
     query.titles.forEach((value, index) => {
       if (normalized === wantedTitles[index]) {
         addReason(reasons, {
@@ -158,6 +240,24 @@ function matchReasons(entity, query) {
           matched_value: title.value,
           match_method: "case_and_whitespace_normalized",
           strength: "weak_title_candidate",
+        });
+      } else if ([...wantedCores[index]].length >= 2 && entityCore === wantedCores[index]) {
+        addReason(reasons, {
+          query_mode: "title_core_equality",
+          query_value: value,
+          matched_field: title.field,
+          matched_value: title.value,
+          match_method: "core_title_normalized",
+          strength: "weak_title_candidate",
+        });
+      } else if (query.approximate && hasSimilarCore(wantedCores[index], entityCore)) {
+        addReason(reasons, {
+          query_mode: "title_approximate",
+          query_value: value,
+          matched_field: title.field,
+          matched_value: title.value,
+          match_method: "substring_or_trigram",
+          strength: "approximate_title_candidate",
         });
       }
     });
@@ -183,8 +283,12 @@ function matchReasons(entity, query) {
   for (const criterion of query.attributes) {
     const actual = entity.attributes?.[criterion.key];
     const values = Array.isArray(actual) ? actual : [actual];
+    const wantNorm = normalizeTitle(criterion.value);
     for (const value of values) {
-      if (isScalar(value) && String(value) === criterion.value) {
+      if (
+        isScalar(value) &&
+        (String(value) === criterion.value || normalizeTitle(String(value)) === wantNorm)
+      ) {
         addReason(reasons, {
           query_mode: "attribute_exact",
           attribute: criterion.key,
@@ -243,17 +347,18 @@ function candidateEntity(entity) {
   };
 }
 
-function canonicalCandidate(canonical, originals, reasons) {
+function canonicalCandidate(canonical, originals, reasons, assessment = undefined) {
   return {
     canonical_id: canonical.id,
     canonical_verified: true,
     matched_original_ids: originals,
     matched_reasons: reasons,
     entity: candidateEntity(canonical),
+    ...(assessment ? { assessment } : {}),
   };
 }
 
-function unresolvedCandidate(original, reasons, status, code) {
+function unresolvedCandidate(original, reasons, status, code, assessment = undefined) {
   return {
     canonical_id: null,
     canonical_verified: false,
@@ -261,6 +366,7 @@ function unresolvedCandidate(original, reasons, status, code) {
     matched_reasons: reasons,
     entity: candidateEntity(original),
     canonical_verification: { status, code },
+    ...(assessment ? { assessment } : {}),
   };
 }
 
@@ -303,6 +409,8 @@ export async function findIdentity({
   mediumId,
   limit = DEFAULT_LIMIT,
   variants = false,
+  approximate = false,
+  includeApproximate = false,
   requestFn = apiRequest,
 }: Record<string, any> = {}) {
   const query = validateInput({
@@ -314,13 +422,25 @@ export async function findIdentity({
     releaseId,
     mediumId,
     limit,
+    approximate: approximate || includeApproximate,
   });
   const queryModes = [];
-  if (query.titles.length)
+  if (query.titles.length) {
     queryModes.push({
       mode: "title_normalized_equality",
       values: query.titles,
     });
+    queryModes.push({
+      mode: "title_core_equality",
+      values: query.titles,
+    });
+    if (query.approximate) {
+      queryModes.push({
+        mode: "title_approximate",
+        values: query.titles,
+      });
+    }
+  }
   if (query.externalIds.length)
     queryModes.push({ mode: "external_id_exact", values: query.externalIds });
   if (query.attributes.length)
@@ -355,6 +475,7 @@ export async function findIdentity({
         ...(query.workId ? { work_id: query.workId } : {}),
         ...(query.releaseId ? { release_id: query.releaseId } : {}),
         ...(query.mediumId ? { medium_id: query.mediumId } : {}),
+        ...(query.approximate ? { include_approximate: true } : {}),
         limit: query.limit,
       },
     });
@@ -431,6 +552,23 @@ export async function findIdentity({
       ...reason,
       original_id: original.id,
     }));
+    if (
+      !reasons.length &&
+      query.approximate &&
+      query.titles.length &&
+      Array.isArray(row?.assessment?.matched_fields) &&
+      row.assessment.matched_fields.includes("title_similar")
+    ) {
+      reasons.push({
+        query_mode: "title_approximate",
+        query_value: query.titles[0],
+        matched_field: "title",
+        matched_value: original.title || "",
+        match_method: "server_word_similarity",
+        strength: "approximate_title_candidate",
+        original_id: original.id,
+      });
+    }
     if (!reasons.length) {
       unknown.push({
         stage: "collection",
@@ -455,6 +593,7 @@ export async function findIdentity({
           reasons,
           404,
           "canonical_identity_unverified",
+          row.assessment,
         ),
       );
       unknown.push({
@@ -470,8 +609,10 @@ export async function findIdentity({
         canonical,
         originals: [],
         reasons: [],
+        assessment: row.assessment,
       });
     const group = canonicalGroups.get(canonical.id);
+    if (!group.assessment && row.assessment) group.assessment = row.assessment;
     if (!group.originals.includes(original.id))
       group.originals.push(original.id);
     for (const reason of reasons) addReason(group.reasons, reason);
@@ -482,6 +623,7 @@ export async function findIdentity({
         group.canonical,
         group.originals.sort(),
         group.reasons,
+        group.assessment,
       ),
     );
   }
@@ -556,6 +698,9 @@ export function parseArgs(argv) {
       case "--title":
         options.titles.push(value());
         break;
+      case "--approximate":
+        options.approximate = true;
+        break;
       case "--external": {
         const [provider, externalValue] = parsePair(value(), "--external");
         options.externalIds.push({ provider, value: externalValue });
@@ -599,6 +744,7 @@ export function usage() {
     "用法：node mf-find-identity.ts [选项]",
     "  --kind <kind>             实体类型，默认 work",
     "  --title <题名>            可重复；比较基础题名、translations.title 与 aliases",
+    "  --approximate             开启近似题名召回（子串与 pg_trgm 相似度，返回 title_similar）",
     "  --variants                补充发现带括号限定的同题名条目；仍需核对身份",
     "  --external <provider=id>  可重复；外部标识精确匹配",
     "  --attribute <key=value>   可重复；attributes 字段精确匹配",

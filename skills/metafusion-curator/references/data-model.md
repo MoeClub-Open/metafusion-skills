@@ -5,19 +5,23 @@
 ## 八种实体
 
 ```text
-Agent：个人 / 机构 / 团体 / 虚构角色
-Collection：系列 / 企划，经 includes 聚合
-Work：创作身份与正式题名
-├── ContentUnit：同 Work 的章 / 集 / 篇目，parent_id 构成目录树
-└── Expression：可复用正文 / 译文 / 录音 / 正片版本
-Release：具体发行，经 subjects 声明 Work
-└── Medium：盘 / 卷 / 文件集
-    └── Track：容器内位置
+Agent：个人 / 团体 / 机构 / 虚构角色（attributes.agent_type）
+Collection：跨媒体企划 / 作品系列 / 选集 / 展会特辑（attributes.collection_type），经 includes 聚合
+Work：创作身份与正式题名（attributes.creation_form 区分 song 与单曲/专辑/动画/游戏等）
+├── ContentUnit：同 Work 的章 / 集 / 篇目（attributes.entry_role），parent_id 构成目录树
+└── Expression：可复用正文 / 译文 / 录音 / 正片版本（attributes.version_label）
+Release：具体发行（edition_type / edition_batch / distribution_channel / packaging / publisher），经 subjects 声明 Work
+└── Medium：盘 / 卷 / 文件集（attributes.format + role）
+    └── Track：容器内位置（attributes.role）
         └── contents[] → Expression（position、locator、sources）
 ```
 
-Agent 不是旧 artist/franchise kind；系列与世界观用 Collection。文件、哈希、对象键与下载地址属于 [存储服务](file-upload.md)，不写入创作题名或目录属性。
-Agent 子类型通过 `attributes.agent_type`（受控词表 `person` / `group` / `organization` / `character`）表达。Release 读取响应附带只读聚合 `medium_formats`（按活动子 `medium` 汇总 `format` 频次），不落库、不进快照。
+- **主分类字段边界**：
+  - `Agent` 通过 `attributes.agent_type`（`person` / `group` / `organization` / `character`）区分主体子类型。
+  - `Collection` 通过 `attributes.collection_type`（`franchise` 跨媒体企划 / `series` 作品系列 / `anthology` 选集丛书 / `event_catalog` 展会活动特辑）区分集合性质；跨媒体企划（`franchise`）或系列（`series`）通过语义关系 `includes`（`collection|work -> work|collection`）聚合旗下各季 TV 动画、剧场动画、OVA/ONA、游戏、漫画、小说及企划音乐 `Work`。
+  - `Work` 通过 `attributes.creation_form` 表达创作形态：单首乐曲建 `Work` 时填 `song`（仅作为曲目被收录时**绝不填** `original_album` 或 `single`）；有独立创作/企划身份的单曲、EP、原创专辑、同人专辑、原声集、精选集分别建 `Work` 并填 `single` / `ep` / `original_album` / `doujin_album` / `soundtrack` / `compilation_album`，经 `includes` 包含各首 `song` `Work`。同名主打歌 `Work`（`song`）与同名标题单曲/专辑 `Work`（`single` / `original_album`）按各自身份独立存在。
+- `Release` 读取响应附带只读聚合 `medium_formats`（按活动子 `medium` 汇总 `format` 频次），不落库、不进快照。文件、哈希、对象键与下载地址属于[存储服务](file-upload.md)，不写入创作题名或目录属性。
+- **新建前近似查重（Agent 硬规）**：执行任何 `action: "create"` 前，必须启用近似匹配查询身份候选（本地 `mf-find-identity.ts --approximate`，MCP `catalog_identity_check` / `metafusion_candidates` 传 `include_approximate: true`），核查 `assessment`（`reuse|review|distinct`、`title_core`、`title_similar` 及主分类冲突）并回读候选详情与关联边后再决定复用或新建。
 
 ## 归属与收录
 
@@ -56,8 +60,9 @@ Work 唯一不代表 Expression 唯一；录音室、现场、伴奏、混音按
 
 | 场景 | 编目 |
 | --- | --- |
+| 跨媒体企划 | 企划本体建 `Collection`（`collection_type="franchise"`），经 `includes` 收录各季 TV 动画、剧场版、游戏、漫画、小说及音乐企划 `Work`；各作之间的续作、改编、外传、配乐关系分别建 `sequel_of` / `adaptation_of` / `spin_off_of` / `soundtrack_of` |
 | 动画 | Work + 有证据的分集 ContentUnit/Expression；真实蓝光/DVD/数字版建 Release、盘建 Medium、收录位置建 Track。盘数不生成“盘作品” |
-| 音乐 | 专辑可有自己的 Work，独立歌曲各自 Work，专辑经当前允许 includes 组成；录音留在歌曲 Work 下。发行 subjects 覆盖专辑及实际收录歌曲，CD/黑胶/精选复用同一录音；MV/现场特典盘建真实载体与表达 |
+| 音乐 | 单首乐曲建 `Work`（`creation_form="song"`），单曲/EP/专辑企划建独立 `Work`（`single` / `ep` / `original_album` / `doujin_album` / `soundtrack` / `compilation_album`）并经 `includes` 包含各首 `song` `Work`；具体录音 `Expression` 归属对应 `song` `Work`。发行 `subjects` 覆盖专辑（`primary`/`compilation`）及实际收录歌曲（`track_work`），CD/黑胶/精选复用同一录音；MV（`music_video`）/现场特典盘建真实载体与表达 |
 | 图书/漫画 | 有目录证据才建 ContentUnit；单行本/精装/电子版各自 Release。章节表达跨版复用，页码留在本版 locator；整本/章节原文与译文用表达组成和 translation_of 关联，实际出版顺序走 Track/contents |
 
 电影本体与同名 OST 都可能是 Work；按内容、责任主体与来源区分，标签不单独判身份。仅重排/定位变化复用内容，真实章节拆合或内容修订再区分 ContentUnit/Expression。

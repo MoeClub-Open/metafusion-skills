@@ -17,6 +17,7 @@
 node mf-source.ts list
 node mf-platform.ts list
 node mf-workspace.ts help
+node mf-find-identity.ts --kind work --title "原题名" --approximate
 node mf-workspace.ts init --dir TASK_DIR --name "修订资料"
 node mf-workspace.ts checkout --dir TASK_DIR --entity ENTITY_UUID
 node mf-workspace.ts stage --dir TASK_DIR --file operations.json
@@ -53,4 +54,4 @@ AniList 搜索默认动画；漫画和轻小说用 `node mf-source.ts run anilis
 
 AniList 的详情和检索候选都返回来源原始 `genres`，不由程序猜测或自动写入目录。保存候选时保留完整对象：`url` 是本次实际读取地址，`human_page` 是资料页面链接，后者不表示已额外读取；iTunes 候选的页面地址另在 `data.raw.hits[].url`。缺 URL 时省略引用行，不能把 `null` 或 `undefined` 拼进提交说明，来源仍为可选。
 
-裸题名查重可用 `node mf-find-identity.ts --kind work --title "原题名" --variants`，补充发现带括号限定的同题名。额外结果在 `title_discovery.items`，不混入精确候选；它仅覆盖每个题名的首个搜索页，失败记录在 `title_discovery.failures`，不能把失败当作没有重复条目。没有经过身份核对，不自动复用、新建或生成别名。
+**新建前近似查重（Agent 硬规）**：暂存任何 `action:"create"` 前，必须先运行 `node mf-find-identity.ts --kind <kind> --title "<title>" --approximate`（向服务端传 `include_approximate: true`；已知主分类时一并传 `--attribute agent_type=...` / `creation_form=...` / `collection_type=...` 以标记 `*_mismatch` 冲突）。服务端默认索引 `core_title`（去法人词缀、末尾媒介括号与中点标点，记 `title_core`），`--approximate` 额外召回子串与 `pg_trgm`（`word_similarity >= 0.6`）近似候选（记 `title_similar`，默认建议 `review`）。凡返回 `reuse` 或 `review` 候选，Agent 必须检查 `assessment`（`reuse|review|distinct`、`conflicts`、`context_summary`）并用 `entity.batch` / `entity.links` 读取候选详情与关系后再决定复用已有 UUID 还是新建独立实体。另可用 `--variants` 在 `title_discovery.items` 补充搜索首个结果页的带括号变体（失败记入 `title_discovery.failures`，不混入原生候选）。

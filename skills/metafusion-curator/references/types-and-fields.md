@@ -1,37 +1,65 @@
-# 字段适用层级、白名单与结构化字段（面向 Agent）
+# 字段适用层级、分类词表与结构化字段
 
-实体可写属性按当前生效 definitions 的字段适用层级判断。当前实体与定义均无业务分类 `types`；旧 `document.types`、实体 `types` 和基于它们的字段并集不适用。
+实体可写属性由目标实例 `GET /api/catalog/definitions` 中 `document.fields[code].applicable_kinds` 与 `enabled` 动态决定；实体与定义均无 `types` 字段。字段、词表、关系与模板均支持管理员通过后台 GUI 或实例 seed 扩展；以下完整列出标准基线，供 Agent 精确填写而无需猜测代码，写入实例自定义扩展项前仍以当前 `definitions` 为准。
 
-## 唯一规则：字段自身的 `applicable_kinds` 决定适用层级
+## 实体共用字段与动态属性规则
 
-先读 `GET /api/catalog/definitions`，取 `document.fields` 中 `applicable_kinds` 包含实体 kind 的字段码。字段值按该字段的 `type`、词表、引用范围、启用状态及子组约束校验；字段的值类型不是实体业务分类。没有适用层级的字段不能直接写到 Entity.attributes，可能专供关系或内嵌组使用。
+- **可写顶层字段**：`title`、`original_language`、`translations`、`attributes`、`external_links`、`pictures`、`position`、`number`；结构归属（`work_id`、`content_unit_id`、`release_id`、`medium_id`、`parent_id`）与收录（`subjects`、`contents`）按 `kind` 校验，见[载荷模板](api-templates.md)。
+- **只读投影字段**（写入时严禁提交或由副本自动剥离）：`id`、`version`、`state`、`review_status`、`created_by`、`updated_at`、`redirect_id`，以及 `kind=release` 读取时按活动子 `medium` 聚合的 `medium_formats`（`Record<string, number>`）。
+- **适用层级校验**：没有 `applicable_kinds` 或未包含当前 `kind` 的字段（如仅供关系或内嵌组使用的字段）直接写入 `Entity.attributes` 会返回 `unknown_field`；选择展示模板不会扩大 `applicable_kinds` 白名单。
+- **枚举与实体引用校验**：`enum` 字段必须填写 `document.vocabularies` 中启用的词项 `code`（提交显示名返回 `invalid_term`）。`entity` 引用字段（如 `Work.attributes.duration_source -> expression`、`Release.attributes.publisher -> agent`）要求目标实体存在、`kind` 匹配、对当前调用者可见且未处于 `deleted`/`merged`，不得填写纯文本名称。
+- **自由文本字段**：`country`、`platform`、`version_label`、`credit_role`、`scope`、`magazine`、`broadcast_weekday`、`air_network`、`copyright`、`author` 类型均为 `text`，不是枚举词表。
+- **模板匹配**：详情模板仅按显式 `match` 与 `priority` 自动匹配（如 `agent_type`、`collection_type`、`creation_form` 驱动细分模板），`match: []` 为该 `kind` 兜底布局；分类字段本身不限制同 `kind` 其他已启用字段的可写性。
 
-    {
-      "entity": {
-        "kind": "release",
-        "attributes": {"catalog_number": "VWBS-1531"}
-      }
-    }
+## 八类实体主分类与标准属性基线
 
-上述仅演示属性落点，完整创建信封与必填值见 [载荷模板](api-templates.md)。不要向当前请求添加已移除的 `types`；正式用途、媒介属性和身份依实际字段、收录与来源表达，标签不承担业务分类约束。新版可选 creation_form 仅作为 Work 的受控描述与模板条件，词项和模板可通过 GUI 编辑。
+| 实体 `kind` | 主分类 / 核心标识字段 | 标准词项 `code` 与中文说明 | 同层级其他标准种子属性 / 结构 |
+| --- | --- | --- | --- |
+| `agent` | `attributes.agent_type`（enum `agent_type`） | `person`（个人）、`group`（团体 / 组合）、`organization`（机构 / 公司）、`character`（虚构角色） | `birth_date`（`allow_yearless: true`，支持 `--MM-DD`）、`death_date`、`formation_date`、`dissolution_date`、`occupations`（`string[]`）、`activity_periods`（`[{begin?, end?}]`）、`tags` |
+| `collection` | `attributes.collection_type`（enum `collection_type`） | `franchise`（跨媒体企划）、`series`（作品系列）、`anthology`（选集 / 丛书）、`event_catalog`（展会 / 活动特辑） | `language`、`begin_date`、`end_date`、`tags`；成员作品用语义关系 `includes` 聚合 |
+| `work` | `attributes.creation_form`（enum `creation_form`） | 见下表 `creation_form` 完整词项表（区分单首乐曲 `song` 与单曲/专辑企划） | `language`、`edition_date`、`copyright`、`imdb`、`infobox`、`events`、`duration`、`duration_source`（`entity -> expression`）、`author`、`volume_count`、`magazine`、`begin_date`、`end_date`、`episodes`、`platform`、`broadcast_start`、`broadcast_weekday`、`broadcast_end`、`air_network`、`tags` |
+| `content_unit` | `attributes.entry_role`（enum `entry_role`） | `main`（本篇）、`opening`（片头曲）、`ending`（片尾曲）、`trailer`（预告 / 宣传）、`extra`（其它附加）、`other`（其它） | `air_date`（篇目级首播/发布日）、`language`、`tags`（无 `duration`；必填结构 `work_id`，可选 `parent_id`） |
+| `expression` | `attributes.version_label`（自由文本） | 自由文本，如 `录音室版`、`现场版`、`Instrumental`、`导演剪辑版` | `isrc`、`duration`、`language`、`events`、`tags`（必填结构 `work_id`，可选 `content_unit_id`） |
+| `release` | 正交枚举：`edition_type`、`edition_batch`、`distribution_channel`、`packaging` + `publisher`（`entity -> agent`） | 见下表 `release` 四维词项表 | `catalog_number`、`barcode`、`isbn`、`edition_date`、`country`、`platform`、`attachments`、`store_bonuses`、`events`、`tags`；结构字段 `Release.subjects[]`（`role` 取 `release_role`） |
+| `medium` | `attributes.format`（enum `format`）+ `attributes.role`（enum `role`） | `format`：`cd`（CD）、`bd`（蓝光）、`uhd_bd`（超高清蓝光）、`dvd`（DVD）、`vinyl`（黑胶）、`sacd`（SACD）、`cassette`（磁带）、`paper`（纸质册）、`digital`（数字文件集）、`web`（网络配信） | `catalog_number`、`tags`（必填结构 `release_id`，可选 `parent_id`） |
+| `track` | `attributes.role`（enum `role`） | 同下方 `role` 词表 | `duration`、`tags`；结构字段 `Track.contents[]`（必填结构 `medium_id`，可选 `parent_id`） |
 
-## 实体字段与动态属性
+### `work` 创作形态词表（`creation_form`）与边界
 
-title、original_language、translations、attributes、external_links、pictures、position、number 是共用实体字段；归属与结构引用按 kind 校验，见 [载荷模板](api-templates.md)。state、review_status、created_by、updated_at、redirect_id 以及发行版（`kind=release`）读取时按活动子载体聚合的 `medium_formats`（`Record<string, number>`，写入副本时自动剥离）都是只读投影。attributes 不维护固定种子白名单：取当前启用字段的 applicable_kinds，不能靠选择模板扩大范围。
+| 领域 | 标准词项 `code` 与中文说明 |
+| --- | --- |
+| 音乐 | `song`（歌曲 — 单首乐曲作品）、`single`（单曲）、`ep`（迷你专辑 / EP）、`original_album`（原创专辑）、`doujin_album`（同人专辑）、`soundtrack`（原声集）、`compilation_album`（精选集 / 合辑） |
+| 动画 | `tv_anime`（TV动画）、`theater_anime`（剧场动画）、`ova`（OVA）、`ona`（Web动画） |
+| 图书 / 画集 | `manga_serialized`（连载漫画）、`manga_volume`（漫画单行本）、`light_novel`（轻小说）、`novel_general`（一般小说）、`artbook`（画集 / 设定集）、`photobook`（写真集） |
+| 游戏 | `visual_novel`（视觉小说）、`eroge`（美少女游戏）、`indie_game`（独立游戏）、`commercial_game`（商业游戏） |
+| 音声 | `audio_drama`（音声作品）、`radio_drama`（广播剧） |
+| 影视 / 视频 / 其他 | `film`（电影）、`tv_drama`（电视剧）、`music_video`（音乐视频）、`personal`（个人创作） |
+| 宽泛兜底码 | `music`（音乐）、`literature`（文学）、`screen`（影视）、`photography`（写真）、`game`（游戏） |
 
-两个易错点：
+- **`song` 与专辑/单曲 `Work` 严格区分**：单首乐曲建 `work` 一律填 `creation_form: "song"`，仅作为专辑/单曲中的曲目被收录时**绝不填** `original_album` 或 `single`。有独立企划/汇编创作身份的单曲、EP、专辑另建 `work` 并填 `single` / `ep` / `original_album` / `doujin_album` / `soundtrack` / `compilation_album`，通过 `includes` 关系包含各首 `song` `work`；同名主打歌（`song`）与同名标题单曲/专辑（`single` / `original_album`）是两个独立 `work`。
+- 优先使用具体细化码，仅当来源无法区分细化形态时使用宽泛兜底码（`music` / `literature` / `screen` / `photography` / `game`）。
 
-- 默认种子中 `duration_source` 是 entity 字段且指向 expression，`publisher` 是 entity 字段且指向 agent；当前目标 kind 范围仍取 definitions
-  （不能指向 release 自己的文本名）。entity 字段要求目标实体**存在、kind 相符、对当前用户可见且未 deleted/merged**。
-- `tags` 是八种实体共通的自由标签，不是受控业务分类，也不能单独证明实体身份。版本类别、发行批次、同梱物和店铺特典仍优先写到 `edition_type` / `edition_batch` / `attachments` / `store_bonuses`；标签不能代替这些结构化事实。
+### `release` 正交枚举维度与发行方
 
-## 词表与模板
+| 字段码 | 类型 / 词表 | 标准词项 `code` 与中文说明 |
+| --- | --- | --- |
+| `edition_type` | enum `edition_type` | `standard`（普通版）、`limited`（限定版）、`deluxe`（豪华版）、`boxset`（套盒） |
+| `edition_batch` | enum `edition_batch` | `regular`（通常发行）、`first_press`（初回发行）、`reissue`（再版 / 重发）、`reprint`（重印） |
+| `distribution_channel` | enum `distribution_channel` | `mixed`（混合）、`physical`（实体）、`digital`（数字）、`web`（网络配信） |
+| `packaging` | enum `packaging` | `standard`（标准包装）、`jewel`（Jewel Case）、`slipcase`（腰封 / 外封套）、`box`（盒装）、`boxset`（套盒）、`digipak`（Digipak） |
+| `publisher` | `entity -> agent` | 指向出版商 / 唱片厂牌 `agent` 实体 UUID（禁止写字符串） |
 
-枚举字段引用 `document.vocabularies`，写当前启用词项 code，不能提交本地化 names。字段必须启用且适用于当前 kind；词表可扩展，不把静态码表当作实例能力。非法词项返回 `invalid_term`，消息可能含字段前缀。
+四个枚举维度正交并存（例如日本初回限定实体 Digipak 盘可同时填 `edition_type="limited"`、`edition_batch="first_press"`、`distribution_channel="physical"`、`packaging="digipak"`、`country="JP"`）。
 
-新版 `creation_form` 词项来自现有创作模板码及 song；不在本页复制清单，实际以实例启用词项为准。creation_form 可省略，不证明身份或限制其他字段可写性。
-模板自动选择只按显式 `match` 与 `priority`，并列时回到通用事实布局；缺少 match 的模板仅供手工选择，不按已填字段猜类别。显式 `match: []` 表示该 kind 的兜底条件。
-`country`、`platform`、`version_label`、`credit_role`、`scope`、`magazine` 是**自由文本**，不要当枚举填代码。
+## 用途、番位、图片词表与 `credit_role`
+
+| 词表 / 字段 | 适用位置 | 标准词项 `code` 与说明 |
+| --- | --- | --- |
+| `release_role` | `Release.subjects[].role` | `primary`（主作品）、`track_work`（曲目作品）、`compilation`（汇编作品）、`supplement`（附加作品） |
+| `role` | `Medium.attributes.role`、`Track.attributes.role`、关系属性 `role` | `primary`（主要内容）、`supplement`（附加内容，标记为特典）、`side`（唱片面）、`extra`（额外收录）、`commentary`（解说音轨） |
+| `character_rank` | 关系属性 `character_rank`（主要用于 `character_in`） | `main`（主角）、`supporting`（配角）、`guest`（客串 / 单集登场）、`ensemble`（群像）、`narrator`（旁白）、`cameo`（彩蛋登场） |
+| `picture_role` | `Entity.pictures[].role`（`pictures[0]` 恒为主封面，不随 `role` 重排） | `key_visual`（主视觉）、`cover_art`（封面图）、`back_cover`（封底）、`booklet`（手册内页）、`disc_art`（盘面 / 载体图）、`obi`（侧标 / 腰封）、`packaging`（包装实拍）、`poster`（海报）、`character_portrait`（角色立绘）、`person_portrait`（人物肖像）、`logo`（标识）、`scene_still`（剧照 / 场景图）、`event_photo`（活动现场）、`scan`（内页扫描）、`screenshot`（界面截图） |
+| `credit_role` | 关系属性 `credit_role`（自由文本 `text`） | 保存来源中的原始职衔文本（如 `アニメーション制作`、`シリーズ構成`、`Vo. & Gt.`），仅作修饰说明，**绝不替代专用语义关系码** |
 
 ## 结构化字段的形状
 
@@ -72,14 +100,11 @@ title、original_language、translations、attributes、external_links、picture
 
 ### `tags`
 
-`tags` 的音乐建议词包括 `pop`、`j_pop`、`jazz`、`hip_hop`、`electronic`、`alternative`、`rnb`、`children_music`、`spoken_word`、`asmr` 等，以实例 definitions 为准。这些是建议词，不是白名单；来源给出的实际题材可以用自由标签保留，不能因词表缺项就退化为只写 album，也不能根据常识或题名补造题材。
+`tags` 是八种 `kind` 共通的**纯字符串数组**（如 `["青春","乐队"]`），不是受控业务分类，不能代替 `creation_form`、`collection_type`、`agent_type`、`edition_type`、`edition_batch`、`attachments` 或 `store_bonuses`，也不能单独证明实体身份。音乐建议词（如 `pop`、`j_pop`、`jazz`、`hip_hop`、`electronic`、`alternative`、`rnb`、`children_music`、`spoken_word`、`asmr`）仅为建议而非白名单；按来源实际题材录入，不凭常识或题名补造。`GET /api/catalog/tags` 为只读频次聚合。
 
-**纯字符串数组**（不是对象、不是词项码）：`["动画","剧场版"]`。当前种子允许八种 kind 写该字段。
-`GET /api/catalog/tags` 是对它的频次聚合，不是可写的字典表。
+### 主体日期与履历边界
 
-### 主体常用属性
-
-主体（`agent`）支持受控词表字段 `agent_type`（词项：`person` 个人、`group` 团体/组合、`organization` 机构/公司、`character` 虚构角色，驱动 `agent_person` / `agent_group` / `agent_organization` / `agent_character` 细分模板与列表分面）以及 `birth_date`、`death_date`、`formation_date`、`dissolution_date`、`occupations`（字符串数组）与 `activity_periods`（`[{begin?,end?}]`），实际可写范围以当前 definitions 为准。日期默认含年份；只有字段声明 `allow_yearless:true` 时可用 `--MM-DD`（默认种子的 `birth_date` 已启用）。职业与活动期描述主体自身，在具体作品中的职责仍走语义关系，不能互相替代。新增字段与词项须由实例内容 seed 或管理操作发布后才能使用。
+`agent` 日期默认须含年份；仅字段声明 `allow_yearless: true` 时支持无年份格式 `--MM-DD`（默认种子中 `birth_date` 已启用，常用于角色生日）。`occupations` 与 `activity_periods` 描述主体自身职业与活动期；主体在具体作品或发行中的职责必须走语义关系（见[关系](relations.md)），团体成员在籍期走 `member_of` 的 `begin_date`/`end_date`。
 
 ### `locator`
 

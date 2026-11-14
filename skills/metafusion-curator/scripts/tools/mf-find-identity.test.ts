@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { findIdentity, runCli } from "./mf-find-identity.ts";
+import { coreTitle, findIdentity, runCli } from "./mf-find-identity.ts";
 
 const entity = (id, extra = {}) => ({ id, kind: "work", title: "夜明け", state: "active", version: 1, ...extra });
 const response = (records = [], overrides = {}) => ({ status: 200, body: {
@@ -96,6 +96,48 @@ test("未解析 canonical、已删除终点或无法核验的命中必须停止�
     assert.equal(r.decision, "needs_evidence");
     assert.ok(r.unknown.length);
   }
+});
+
+test("核心题名归一化与 --approximate 近似题名查重支持标点、法人词缀与近似季名召回", async () => {
+  assert.equal(coreTitle("株式会社京都アニメーション"), "京都アニメーション");
+  assert.equal(coreTitle("Poppin'Party"), "poppinparty");
+  assert.equal(coreTitle("BanG Dream! (TVアニメ)"), "bangdream");
+  assert.equal(coreTitle("Dawn [CD]"), "dawn");
+  assert.equal(coreTitle("BanG Dream! [Blu-ray]"), "bangdream");
+
+  const corp = entity("kyoto", { kind: "agent", title: "株式会社京都アニメーション" });
+  const coreReport = await findIdentity({
+    kind: "agent",
+    titles: ["京都アニメーション"],
+    requestFn: query(response([corp])),
+  });
+  assert.equal(coreReport.unknown.length, 0);
+  assert.equal(coreReport.candidates[0].matched_reasons[0].query_mode, "title_core_equality");
+
+  const season2 = entity("s2", { kind: "work", title: "BanG Dream! 2nd Season" });
+  const calls = [];
+  const approxReport = await findIdentity({
+    kind: "work",
+    titles: ["BanG Dream!"],
+    approximate: true,
+    requestFn: query(
+      response([], {
+        total: 1,
+        items: [
+          {
+            matched: season2,
+            canonical: season2,
+            assessment: { matched_fields: ["title_similar"], confidence: 0.12, recommended_action: "review" },
+          },
+        ],
+      }),
+      calls,
+    ),
+  });
+  assert.equal(calls[0].options.body.include_approximate, true);
+  assert.equal(approxReport.unknown.length, 0);
+  assert.equal(approxReport.candidates[0].matched_reasons[0].query_mode, "title_approximate");
+  assert.equal(approxReport.candidates[0].assessment.recommended_action, "review");
 });
 
 test("完整快照零候选只说明当前可见范围；并发改变无关数据不影响 coverage", async () => {

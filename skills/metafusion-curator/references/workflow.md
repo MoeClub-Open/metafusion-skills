@@ -8,9 +8,12 @@
 
 暂存前必须逐条读过要写的内容：抓取结果、模型生成或从他人清单转抄的字段，未经阅读核对不得成批 stage。条数多不是问题，没人读过才是问题（见 [SKILL.md](../SKILL.md) 的硬规）。译名、职衔署名、关系端点与季归属四类要对着原文逐行确认；读不到依据就留空，并在提交说明里写明缺什么依据。
 
+**新建前近似查重（Agent 硬规）**：HTTP 与副本协议层将 `/api/catalog/entities/candidates` 及 `/candidates/batch` 作为只读辅助接口，不阻断 `stage`，也不要求提交 `reviewed_candidate_ids`；但对于 AI Agent（技能、MCP、站内助手、Planner/Worker），在暂存任何 `action: "create"` 前**必须**先执行带近似匹配的身份候选查询。候选接口默认索引 `core_title`（折叠全角 ASCII，剥离 `株式会社`/`Co., Ltd.` 等法人词缀、`(TVアニメ)`/`[CD]` 等末尾媒介限定括号及中点/标点，命中记 `title_core`），传 `include_approximate: true`（本地 `--approximate`）额外召回子串与 `pg_trgm`（`word_similarity >= 0.6`）近似题名候选（记 `title_similar`，默认建议 `review`）；主分类不一致（`agent_type_mismatch` / `creation_form_mismatch` / `collection_type_mismatch`）在 `assessment.conflicts` 报告并建议 `distinct`。凡返回 `reuse` 或 `review` 候选，Agent 必须检查 `assessment` 并回读候选实体详情与关联边，确认复用已有 UUID 还是新建独立实体（如同名 `song` Work 与 `single`/`original_album` Work、第 1 季与第 2 季）。
+
 在技能的 `scripts/tools/` 目录运行，`TASK_DIR` 是本任务的本地目录：
 
 ```sh
+node mf-find-identity.ts --kind work --title "待建题名" --attribute creation_form=tv_anime --approximate
 node mf-workspace.ts init --dir TASK_DIR --name "修订发行资料"
 node mf-workspace.ts checkout --dir TASK_DIR --entity ENTITY_UUID
 node mf-workspace.ts stage --dir TASK_DIR --file operations.json
