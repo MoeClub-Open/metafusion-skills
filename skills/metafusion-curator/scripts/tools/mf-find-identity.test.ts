@@ -138,6 +138,26 @@ test("核心题名归一化与 --approximate 近似题名查重支持标点、�
   assert.equal(approxReport.unknown.length, 0);
   assert.equal(approxReport.candidates[0].matched_reasons[0].query_mode, "title_approximate");
   assert.equal(approxReport.candidates[0].assessment.recommended_action, "review");
+
+  const ras = entity("ras", {
+    kind: "agent",
+    title: "RAISE A SUILEN",
+    translations: { "ja-JP": { title: "RAISE A SUILEN", aliases: [] } },
+    attributes: { agent_type: "group", former_names: [{ name: "THE THIRD(仮)", ended: true }] },
+  });
+  const formerReport = await findIdentity({
+    kind: "agent",
+    titles: ["THE THIRD(仮)"],
+    requestFn: query(
+      response([], {
+        total: 1,
+        items: [{ matched: ras, canonical: ras, assessment: { matched_fields: ["alias"], confidence: 0.3, recommended_action: "review" } }],
+      }),
+    ),
+  });
+  assert.equal(formerReport.unknown.length, 0);
+  assert.equal(formerReport.candidates.length, 1);
+  assert.equal(formerReport.candidates[0].matched_reasons[0].matched_field, "attributes.former_names[0].name");
 });
 
 test("完整快照零候选只说明当前可见范围；并发改变无关数据不影响 coverage", async () => {

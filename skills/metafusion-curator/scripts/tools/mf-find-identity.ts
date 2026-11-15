@@ -185,6 +185,14 @@ function entityTitleValues(entity: Record<string, any>) {
         values.push({ field: "aliases[" + index + "]", value });
     });
   }
+  if (Array.isArray(entity.attributes?.former_names)) {
+    entity.attributes.former_names.forEach((entry, index) => {
+      const name = typeof entry === "string" ? entry : entry?.name;
+      if (typeof name === "string" && name.trim()) {
+        values.push({ field: "attributes.former_names[" + index + "].name", value: name });
+      }
+    });
+  }
   for (const [locale, translation] of Object.entries<Record<string, any>>(
     entity.translations || {},
   )) {
