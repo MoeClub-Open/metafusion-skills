@@ -14,7 +14,7 @@
 | `invalid_document` | 文档形状错误；有 `operation` / `pointer` 时按操作序号与文档路径修正。图片 caption 是语言对象，source 可省略，不能传字符串 |
 | `invalid_checkout_size` / `invalid_commit_size` | checkout 的实体与关系合计最多 100；stage 最多 100 个操作，每个 update 最多 200 个 patch。分次保存可共用一个 commit，不能盲目拆开同批 `$ref` |
 | `unknown_field` / `disabled_field` / `invalid_term` | 读取当前 definitions，核字段适用 kind 与启用词项；不要用显示名代替 code |
-| `immutable_scope` / `invalid_structural_field` / `parent_required` | 核八种实体和固定归属；普通编辑不改变 kind/work_id/release_id/medium_id |
+| `immutable_scope` / `invalid_structural_field` / `parent_required` | 核九种实体和固定归属；普通编辑不改变 kind/work_id/release_id/medium_id |
 | `undeclared_release_subject` / `invalid_reference` / `constraint_violation` | 核收录、归属和目标可见性，同一副本补齐相关结构后再合入；不以近似关系规避 |
 | `invalid_relation_type` / `invalid_endpoints` / `relation_cycle` / `cardinality_exceeded` | 核关系定义、方向、范围和现有关系；反向展示不要求另建反向边 |
 | `invalid_source` / `invalid_picture` | 提供了元数据时修正其形状；来源本身可省略，不编造来源以通过校验 |

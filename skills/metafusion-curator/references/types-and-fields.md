@@ -11,18 +11,19 @@
 - **自由文本字段**：`country`、`platform`、`version_label`、`credit_role`、`scope`、`magazine`、`broadcast_weekday`、`air_network`、`copyright`、`author` 类型均为 `text`，不是枚举词表。
 - **模板匹配**：详情模板仅按显式 `match` 与 `priority` 自动匹配（如 `agent_type`、`collection_type`、`creation_form` 驱动细分模板），`match: []` 为该 `kind` 兜底布局；分类字段本身不限制同 `kind` 其他已启用字段的可写性。
 
-## 八类实体主分类与标准属性基线
+## 九类实体主分类与标准属性基线
 
 | 实体 `kind` | 主分类 / 核心标识字段 | 标准词项 `code` 与中文说明 | 同层级其他标准种子属性 / 结构 |
 | --- | --- | --- | --- |
-| `agent` | `attributes.agent_type`（enum `agent_type`） | `person`（个人）、`group`（团体 / 组合）、`organization`（机构 / 公司）、`character`（虚构角色） | `birth_date`（`allow_yearless: true`，支持 `--MM-DD`）、`death_date`、`formation_date`、`dissolution_date`、`occupations`（`string[]`）、`activity_periods`（`[{begin?, end?}]`）、`tags` |
-| `collection` | `attributes.collection_type`（enum `collection_type`） | `franchise`（跨媒体企划）、`series`（作品系列）、`anthology`（选集 / 丛书）、`event_catalog`（展会 / 活动特辑） | `language`、`begin_date`、`end_date`、`tags`；成员作品用语义关系 `includes` 聚合 |
-| `work` | `attributes.creation_form`（enum `creation_form`） | 见下表 `creation_form` 完整词项表（区分单首乐曲 `song` 与单曲/专辑企划） | `language`、`edition_date`、`copyright`、`imdb`、`infobox`、`events`、`duration`、`duration_source`（`entity -> expression`）、`author`、`volume_count`、`magazine`、`begin_date`、`end_date`、`episodes`、`platform`、`broadcast_start`、`broadcast_weekday`、`broadcast_end`、`air_network`、`tags` |
+| `agent` | `attributes.agent_type`（enum `agent_type`） | `person`（个人）、`group`（团体 / 组合）、`organization`（机构 / 公司）、`character`（虚构角色） | `former_names`（`[{name, language?, begin_date?, end_date?, ended?, note?}]`）、`birth_date`（`allow_yearless: true`，支持 `--MM-DD`）、`death_date`、`formation_date`、`dissolution_date`、`date_precision`、`earliest_date`、`latest_date`、`occupations`（`string[]`）、`activity_periods`（`[{begin?, end?, ended?, note?}]`）、`tags` |
+| `collection` | `attributes.collection_type`（enum `collection_type`） | `franchise`（跨媒体企划）、`series`（作品系列）、`anthology`（选集 / 丛书）、`event_catalog`（展会 / 活动特辑） | `language`、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`tags`；成员作品用语义关系 `includes` 聚合 |
+| `work` | `attributes.creation_form`（enum `creation_form`） | 见下表 `creation_form` 完整词项表（区分单首乐曲 `song` 与单曲/专辑企划） | `language`、`edition_date`、`copyright`、`imdb`、`infobox`、`events`、`duration`、`duration_source`（`entity -> expression`）、`author`、`volume_count`、`magazine`、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`episodes`、`platform`、`broadcast_start`、`broadcast_weekday`、`broadcast_end`、`air_network`、`tags` |
 | `content_unit` | `attributes.entry_role`（enum `entry_role`） | `main`（本篇）、`opening`（片头曲）、`ending`（片尾曲）、`trailer`（预告 / 宣传）、`extra`（其它附加）、`other`（其它） | `air_date`（篇目级首播/发布日）、`language`、`tags`（无 `duration`；必填结构 `work_id`，可选 `parent_id`） |
 | `expression` | `attributes.version_label`（自由文本） | 自由文本，如 `录音室版`、`现场版`、`Instrumental`、`导演剪辑版` | `isrc`、`duration`、`language`、`events`、`tags`（必填结构 `work_id`，可选 `content_unit_id`） |
 | `release` | 正交枚举：`edition_type`、`edition_batch`、`distribution_channel`、`packaging` + `publisher`（`entity -> agent`） | 见下表 `release` 四维词项表 | `catalog_number`、`barcode`、`isbn`、`edition_date`、`country`、`platform`、`attachments`、`store_bonuses`、`events`、`tags`；结构字段 `Release.subjects[]`（`role` 取 `release_role`） |
 | `medium` | `attributes.format`（enum `format`）+ `attributes.role`（enum `role`） | `format`：`cd`（CD）、`bd`（蓝光）、`uhd_bd`（超高清蓝光）、`dvd`（DVD）、`vinyl`（黑胶）、`sacd`（SACD）、`cassette`（磁带）、`paper`（纸质册）、`digital`（数字文件集）、`web`（网络配信） | `catalog_number`、`tags`（必填结构 `release_id`，可选 `parent_id`） |
 | `track` | `attributes.role`（enum `role`） | 同下方 `role` 词表 | `duration`、`tags`；结构字段 `Track.contents[]`（必填结构 `medium_id`，可选 `parent_id`） |
+| `event` | `attributes.event_type`（enum `event_type`） | `concert`（演唱会 / 音乐会）、`tour`（巡回演出）、`festival`（音乐节 / 庆典）、`convention`（展会 / 同人即卖会）、`stage`（舞台剧 / 朗读剧）、`broadcast_event`（特别节目 / 直播活动）、`award`（奖项 / 颁奖礼）、`exhibition`（展览 / 联动展） | `venue`、`location`、`country`、`language`、`cancelled`（`boolean`）、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`time_zone`、`copyright`、`tags` |
 
 ### `work` 创作形态词表（`creation_form`）与边界
 
@@ -59,6 +60,9 @@
 | `role` | `Medium.attributes.role`、`Track.attributes.role`、关系属性 `role` | `primary`（主要内容）、`supplement`（附加内容，标记为特典）、`side`（唱片面）、`extra`（额外收录）、`commentary`（解说音轨） |
 | `character_rank` | 关系属性 `character_rank`（主要用于 `character_in`） | `main`（主角）、`supporting`（配角）、`guest`（客串 / 单集登场）、`ensemble`（群像）、`narrator`（旁白）、`cameo`（彩蛋登场） |
 | `picture_role` | `Entity.pictures[].role`（`pictures[0]` 恒为主封面，不随 `role` 重排） | `key_visual`（主视觉）、`cover_art`（封面图）、`back_cover`（封底）、`booklet`（手册内页）、`disc_art`（盘面 / 载体图）、`obi`（侧标 / 腰封）、`packaging`（包装实拍）、`poster`（海报）、`character_portrait`（角色立绘）、`person_portrait`（人物肖像）、`logo`（标识）、`scene_still`（剧照 / 场景图）、`event_photo`（活动现场）、`scan`（内页扫描）、`screenshot`（界面截图） |
+| `date_precision` | 实体 / 关系 / `events[]` 的 `date_precision` | `exact`（精确）、`circa`（约略）、`inferred`（推定）、`disputed`（存疑）；不确定时间范围配合 `earliest_date` / `latest_date` 记录上下界，已知结束但缺具体结束日设 `ended: true` |
+| `embedded_event_kind` | `attributes.events[].event_kind` | `release`（发售 / 发行）、`broadcast`（放送 / 上映）、`reprint`（重印 / 再贩）、`preorder`（预售 / 预约）、`update`（版本更新）、`milestone`（里程碑）、`discontinued`（停售 / 停服）、`other`（其他） |
+| `transition_type` | 语义关系 `succeeded_by` 的 `attributes.transition_type` | `rename`（独立名义承继）、`merger`（合并）、`acquisition`（收购 / 并购）、`split`（拆分 / 独立）、`transfer`（权利 / 业务移交） |
 | `credit_role` | 关系属性 `credit_role`（自由文本 `text`） | 保存来源中的原始职衔文本（如 `アニメーション制作`、`シリーズ構成`、`Vo. & Gt.`），仅作修饰说明，**绝不替代专用语义关系码** |
 
 ## 结构化字段的形状
@@ -77,6 +81,9 @@
 | `channel` | text | 渠道/平台原文 |
 | `condition` | text | 批次、抽选规则或获取条件 |
 | `date` | date | 相关日期 |
+| `end_date` / `ended` / `date_precision` | date / boolean / enum | 仅 `events` 子项支持：结束日期（不早于 `date`）、已结束标记与时间精度 |
+| `event_kind` | enum `embedded_event_kind` | 仅 `events` 子项支持：结构化区分发售/放送/重印/预售/停售等事件类型 |
+| `event` | entity | 仅 `events` 子项支持：关联顶层 `event` 条目 UUID |
 | `image` / `source_url` | url | 图片与来源链接（绝对 HTTP(S)） |
 | `region` | text | 地区 |
 | `time_zone` | text | 时区 |
@@ -100,11 +107,11 @@
 
 ### `tags`
 
-`tags` 是八种 `kind` 共通的**纯字符串数组**（如 `["青春","乐队"]`），不是受控业务分类，不能代替 `creation_form`、`collection_type`、`agent_type`、`edition_type`、`edition_batch`、`attachments` 或 `store_bonuses`，也不能单独证明实体身份。音乐建议词（如 `pop`、`j_pop`、`jazz`、`hip_hop`、`electronic`、`alternative`、`rnb`、`children_music`、`spoken_word`、`asmr`）仅为建议而非白名单；按来源实际题材录入，不凭常识或题名补造。`GET /api/catalog/tags` 为只读频次聚合。
+`tags` 是九种 `kind` 共通的**纯字符串数组**（如 `["青春","乐队"]`），不是受控业务分类，不能代替 `creation_form`、`collection_type`、`agent_type`、`event_type`、`edition_type`、`edition_batch`、`attachments` 或 `store_bonuses`，也不能单独证明实体身份。音乐建议词（如 `pop`、`j_pop`、`jazz`、`hip_hop`、`electronic`、`alternative`、`rnb`、`children_music`、`spoken_word`、`asmr`）仅为建议而非白名单；按来源实际题材录入，不凭常识或题名补造。`GET /api/catalog/tags` 为只读频次聚合。
 
 ### 主体日期与履历边界
 
-`agent` 日期默认须含年份；仅字段声明 `allow_yearless: true` 时支持无年份格式 `--MM-DD`（默认种子中 `birth_date` 已启用，常用于角色生日）。`occupations` 与 `activity_periods` 描述主体自身职业与活动期；主体在具体作品或发行中的职责必须走语义关系（见[关系](relations.md)），团体成员在籍期走 `member_of` 的 `begin_date`/`end_date`。
+`agent` 日期默认须含年份；仅字段声明 `allow_yearless: true` 时支持无年份格式 `--MM-DD`（默认种子中 `birth_date` 已启用，常用于角色生日）。配对区间（`begin_date`/`end_date`、`earliest_date`/`latest_date`、`birth_date`/`death_date`、`formation_date`/`dissolution_date`、`broadcast_start`/`broadcast_end` 及组内 `RangeStart`）在两端同时填写时要求终点不早于起点。同一主体历史曾用名填 `former_names`，多段活跃与休止期填 `activity_periods`；主体在作品/发行/活动中的职责走语义关系（见[关系](relations.md)），成员在籍期、母子公司隶属期与机构承继走对应关系的时态字段。
 
 ### `locator`
 

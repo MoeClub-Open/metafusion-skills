@@ -26,7 +26,7 @@ const RESERVED_FIELD_CODES = new Set([
   "id", "kind", "version", "status", "state", "review_status", "created_by", "work_id", "parent_id", "release_id", "medium_id",
   "content_unit_id", "contents", "subjects", "redirect_id",
 ]);
-const ENTITY_KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track"]);
+const ENTITY_KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track", "event"]);
 const DEFINITION_MAPS = ["fields", "vocabularies", "relations", "templates", "schemes", "structure"];
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);

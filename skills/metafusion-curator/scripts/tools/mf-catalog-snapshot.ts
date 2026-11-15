@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { collectPages, request } from "../metafusion-api.ts";
 
-const KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track"]);
+const KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track", "event"]);
 const RELEASE_LIST_PATH = "/api/catalog/entities";
 const USAGE = `用法：node mf-catalog-snapshot.ts (--all | --publisher <agent-id> [--catalog-prefix <prefix>] | --catalog-prefix <prefix> | --include-release <release-id>) [筛选...] [--out <file>]
 

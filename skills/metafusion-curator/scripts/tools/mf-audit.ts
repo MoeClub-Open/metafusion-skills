@@ -19,7 +19,7 @@ import { call as mfCall, scopeKey as entityScopeKey } from "./mf-lib.ts";
 
 const BASE = (process.env.MF_BASE || "").replace(/\/+$/, "") || "（由 metafusion-api 的 credentials.json 决定）";
 const OUT_DIR = auditOutputDirectory();
-const KINDS = ["work", "content_unit", "expression", "release", "medium", "track", "agent", "collection"];
+const KINDS = ["work", "content_unit", "expression", "release", "medium", "track", "agent", "collection", "event"];
 // 可选的任务清单；不读取技能安装目录中的历史批次产物。
 const KNOWN13_FILE = process.env.MF_KNOWN_PACKAGES || null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -303,7 +303,7 @@ const trackExprIds = new Set();
 for (const e of byKind.track) for (const c of (Array.isArray(e.contents) ? e.contents : [])) if (c && c.expression_id) trackExprIds.add(c.expression_id);
 const exprNoCUUsedInTrack = exprNoCU.filter((e) => trackExprIds.has(e.id)).length;
 const exprNoCUTopWorks = Object.entries(exprNoCUByWork).sort((a, b) => b[1] - a[1]).slice(0, 20).map((x) => ({ work_id: x[0], work_title: titleOf(x[0]), count: x[1] }));
-const PICTURE_KINDS = ["work", "release", "agent", "collection"];
+const PICTURE_KINDS = ["work", "release", "agent", "collection", "event"];
 const pictureGapDisplay = PICTURE_KINDS.reduce((a, k) => a + noPic[k].count, 0);
 const pictureGapStructural = noPicTotal - pictureGapDisplay;
 const sameScopeDup = [];
@@ -468,7 +468,7 @@ for (const x of dupPrefixTop) L.push("- 前缀 " + x.prefix + "：涉及 " + x.g
 L.push("");
 L.push("## 7. 缺封面口径拆分");
 L.push("");
-L.push("- 展示型 kind（work / release / agent / collection，详情页有封面位）：缺 " + pictureGapDisplay + " 个。");
+L.push("- 展示型 kind（work / release / agent / collection / event，详情页有封面位）：缺 " + pictureGapDisplay + " 个。");
 L.push("- 结构型 kind（content_unit / expression / medium / track）：缺 " + pictureGapStructural + " 个；是否需要封面依实体用途与权利证据判断，缺图数量不等于事实错误。");
 L.push("");
 L.push("## 8. Expression 缺 content_unit_id（" + exprNoCU.length + " 个）");
@@ -482,7 +482,7 @@ L.push("");
 L.push("## 9. 候选缺口汇总（须按来源与用途复核）");
 L.push("");
 L.push("1. 标题缺四语 " + missingLang.length + " 个实体（zh-TW 缺 " + langCounts["zh-TW"] + "、en-US 缺 " + langCounts["en-US"] + "、zh-CN 缺 " + langCounts["zh-CN"] + "）——几乎每个详情页与列表的多语言回退都受影响。");
-L.push("2. 展示型 kind 缺封面 " + pictureGapDisplay + " 个（work " + noPic.work.count + " / release " + noPic.release.count + " / agent " + noPic.agent.count + " / collection " + noPic.collection.count + "）。");
+L.push("2. 展示型 kind 缺封面 " + pictureGapDisplay + " 个（work " + noPic.work.count + " / release " + noPic.release.count + " / agent " + noPic.agent.count + " / collection " + noPic.collection.count + " / event " + noPic.event.count + "）。");
 L.push("3. 同作用域重复候选 " + sameScopeDup.length + " 组（work " + duplicates.work.same_scope_groups + " / content_unit " + duplicates.content_unit.same_scope_groups + " / expression " + duplicates.expression.same_scope_groups + " / release " + duplicates.release.same_scope_groups + " / agent " + duplicates.agent.same_scope_groups + "）——搜索结果与详情分叉。");
 L.push("4. 裸母体 Work " + bareWorks.length + " 个（清单内待补 " + bareKnown.length + " 个；其余 " + bareOther.length + " 个无任何子级，详情页空壳）。");
 L.push("5. Expression 未挂 content_unit_id " + exprNoCU.length + " 个（选填字段，未判定为错误）。");

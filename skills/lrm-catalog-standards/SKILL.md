@@ -16,6 +16,7 @@ description: 选择 MetaFusion 实体层级、命名作品与发行版、判断�
 | Expression | 具体正文、译文、录音或剪辑（`attributes.version_label` 自由文本），可跨发行复用 |
 | Release | 原样保留发行方为该版使用的名称；正交记录 `edition_type`、`edition_batch`、`distribution_channel`、`packaging` 与发行主体 `publisher`（`entity -> agent`） |
 | Medium / Track | 实际承载单元（`attributes.format` + `role`）与收录位置（`attributes.role` + `Track.contents[]`），`number` 保留官方编号、`position` 表示顺序 |
+| Event | 多主体或多作品共用的独立活动（`attributes.event_type`：演唱会、巡演、音乐节、展会/即卖会、舞台剧、特别节目、奖项、展览）；单一作品/发行的发售、重印、停售节点写内嵌 `attributes.events[]` |
 
 - **新建前必须近似查重（Agent 硬规）**：执行任何 `action: "create"` 前，必须启用近似匹配运行身份候选查询（本地 `node mf-find-identity.ts --kind <kind> --title "<title>" --approximate`；MCP `catalog_identity_check` 或 `metafusion_candidates` 传 `include_approximate: true`；站内助手 `catalog_candidates` 传 `titles` 时默认开启）。命中 `reuse` 或 `review` 候选（含 `title_core` 核心题名与 `title_similar` 近似题名）时，必须核查 `assessment`（含 `agent_type_mismatch` / `creation_form_mismatch` / `collection_type_mismatch` 子类型冲突）并读取候选详情与关系，区分复用已有 UUID 与新建同名异物（如同名 `song` Work 与 `single`/`original_album` Work、不同季度动画）。
 - 正式题名中的 Season、Vol、OST 等按来源保留，不自行增加 `[CD]`、品番或版本后缀。中文名称采用[官方或授权本地化译名](../metafusion-curator/references/source-policy.md#中文译名)，无官方译名就用原名。
@@ -24,5 +25,6 @@ description: 选择 MetaFusion 实体层级、命名作品与发行版、判断�
 - 歌曲录音仍属于歌曲 Work，专辑组成用相应关系；Release.subjects 声明收录 Work，Track.contents 引用实际 Expression。组成、版本组与本版曲序分别记录。
 - 多作品盒装按 subjects + Medium/Track 收录；有独立汇编创作证据时再建 Work。有实际目录再建章、集或曲目，初回附件和真实特典盘分别表达。
 - 署名严格区分职责：`created_by` 仅限原作者/原案/著作人；动画制作公司、制作委员会、制片人、同人社团、游戏厂商一律用 `produced_by`（原职衔写 `credit_role`，出版发行商写 `Release.attributes.publisher`）；专用署名码优先（如词曲编 `lyricist_of`/`composed_by`/`arranged_by`、团体成员 `member_of`），`credit_for` 仅作无专用码时的兜底且绝不重复建边。
+- 主体沿革按身份连续性区分：同一法人/团体/艺人改名保留同一 `Agent` 并记录 `former_names`（休团/复出用 `activity_periods`）；跨独立主体的母子公司隶属用 `subsidiary_of`（带 `begin_date`/`end_date`/`ended`），收购、合并、拆分、权利移交用 `succeeded_by`（前身 `source_id` → 后继 `target_id`，填 `transition_type`）。
 
-完整分类词表、32 条语义关系与扩展规则见[字段](../metafusion-curator/references/types-and-fields.md)、[关系](../metafusion-curator/references/relations.md)和[定义扩展](../metafusion-curator/references/model-gaps.md)。
+完整分类词表、36 条语义关系与扩展规则见[字段](../metafusion-curator/references/types-and-fields.md)、[关系](../metafusion-curator/references/relations.md)和[定义扩展](../metafusion-curator/references/model-gaps.md)。

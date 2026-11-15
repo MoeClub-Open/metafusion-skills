@@ -33,7 +33,7 @@ const entity = (x: unknown, id?: string): x is CatalogEntity =>
   record(x) &&
   typeof x.id === "string" &&
   (!id || x.id === id) &&
-  ["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track"].includes(x.kind) &&
+  ["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track", "event"].includes(x.kind) &&
   Number.isSafeInteger(x.version) &&
   x.version > 0 &&
   typeof x.title === "string" &&
@@ -95,6 +95,8 @@ export function schemaFor(action?: string) {
                       classes: {},
                       rule_codes: {},
                       peer_kinds: {},
+                      active_only: { type: "boolean" },
+                      as_of: { type: "string" },
                     },
                   },
                 }

@@ -38,7 +38,7 @@ test("links reader forwards direction, classes, rule_codes and peer_kinds filter
     {
       action: "entity.links",
       id: "work-1",
-      params: { direction: "outgoing", classes: ["semantic", "reference"], rule_codes: ["relation:credit"], peer_kinds: ["agent"] },
+      params: { direction: "outgoing", classes: ["semantic", "reference"], rule_codes: ["relation:credit"], peer_kinds: ["agent", "event"], active_only: true, as_of: "2020-05" },
     },
     { requestFn },
   );
@@ -47,9 +47,12 @@ test("links reader forwards direction, classes, rule_codes and peer_kinds filter
   assert.match(calls[0], /direction=outgoing/);
   assert.match(calls[0], /classes=semantic%2Creference/);
   assert.match(calls[0], /rule_codes=relation%3Acredit/);
-  assert.match(calls[0], /peer_kinds=agent/);
+  assert.match(calls[0], /peer_kinds=agent%2Cevent/);
+  assert.match(calls[0], /active_only=true/);
+  assert.match(calls[0], /as_of=2020-05/);
   assert.ok(calls[0].endsWith("offset=0"));
   assert.equal(validatePlan({ action: "entity.links", id: "work-1", params: { classes: ["bad"] } }), "invalid_link_params");
+  assert.equal(validatePlan({ action: "entity.links", id: "work-1", params: { as_of: "bad-date" } }), "invalid_link_params");
 });
 
 test("links reader reports later-page failure without returning a complete graph", async () => {

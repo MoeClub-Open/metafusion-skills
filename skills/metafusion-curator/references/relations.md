@@ -1,34 +1,34 @@
 # 语义关系码表、方向与消歧规则
 
-语义关系以目标实例 `GET /api/catalog/definitions` 的 `document.relations` 为运行时权威定义，支持管理员通过后台 GUI 或实例 seed 扩展关系码、允许端点与属性。方向一律固定为 `source -> target`（载荷 `source_id` 在左、`target_id` 在右）；同 `kind` 端点写反方向仍可能通过结构校验但语义相反，写入前必须核对方向。以下完整列出 32 条标准种子语义关系基线。
+语义关系以目标实例 `GET /api/catalog/definitions` 的 `document.relations` 为运行时权威定义，支持管理员通过后台 GUI 或实例 seed 扩展关系码、允许端点与属性。方向一律固定为 `source -> target`（载荷 `source_id` 在左、`target_id` 在右）；同 `kind` 端点写反方向仍可能通过结构校验但语义相反，写入前必须核对方向。以下完整列出 36 条标准种子语义关系基线。
 
-## 32 条标准语义关系基线
+## 36 条标准语义关系基线
 
 ### 署名组 `credits`（17 条，`counts_as_credit=true`）
 
-除 `character_in` 的 `participant_slot="character"` 外，其余 16 条均为 `participant_slot="person"`，默认 `acyclic=false`，均允许全部 9 个标准关系属性字段。
+除 `character_in` 的 `participant_slot="character"` 外，其余 16 条均为 `participant_slot="person"`，默认 `acyclic=false`，均允许全部 13 个标准关系属性字段。
 
 | 关系 `code` | 正向 ↔ 反向名称 | `source_kinds -> target_kinds` | 适用边界与填写规则 |
 | --- | --- | --- | --- |
 | `created_by` | 原作 / 作者 ↔ 原作 / 著作 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | **严格仅限原作者、原案、著作人**；严禁用于动画制作公司、制作委员会、同人社团、游戏厂商或唱片厂牌 |
-| `produced_by` | 制作 / 出品 ↔ 制作了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 动画制作公司（`アニメーション制作`）、出品/制作委员会、制片人（`プロデューサー`）、音乐制作人、同人社团（`サークル`）、游戏品牌/厂商（`メーカー`）；具体原始职衔写 `credit_role`。发行版的出版/发行商优先写 `Release.attributes.publisher` |
-| `directed_by` | 导演 ↔ 执导了 | `work`\|`content_unit`\|`expression` -> `agent` | 总导演、导演/监督、系列导演；单集演出无专用码时走 `credit_for` |
-| `written_by` | 编剧 ↔ 编写了 | `work`\|`content_unit`\|`expression` -> `agent` | 系列构成、脚本、剧本 |
+| `produced_by` | 制作 / 出品 ↔ 制作了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 动画制作公司（`アニメーション制作`）、出品/制作委员会、制片人（`プロデューサー`）、音乐制作人、活动主办/协办、同人社团（`サークル`）、游戏品牌/厂商（`メーカー`）；具体原始职衔写 `credit_role`。发行版的出版/发行商优先写 `Release.attributes.publisher` |
+| `directed_by` | 导演 ↔ 执导了 | `work`\|`content_unit`\|`expression`\|`event` -> `agent` | 总导演、导演/监督、舞台演出；单集演出无专用码时走 `credit_for` |
+| `written_by` | 编剧 ↔ 编写了 | `work`\|`content_unit`\|`expression`\|`event` -> `agent` | 系列构成、脚本、舞台/朗读剧剧本 |
 | `composed_by` | 作曲者 ↔ 作曲了 | `work`\|`content_unit`\|`expression` -> `agent` | 歌曲作曲、剧伴音乐作曲 |
 | `lyricist_of` | 作词者 ↔ 作词了 | `work`\|`content_unit`\|`expression` -> `agent` | 作词 |
 | `arranged_by` | 编曲者 ↔ 编曲了 | `work`\|`content_unit`\|`expression` -> `agent` | 编曲；通常挂对应录音 `expression`，仅作品级来源明确不分版本时挂 `work` |
-| `performed_by` | 表演者 ↔ 表演了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 演唱、演奏、乐队/组合表演；团体成员归属另建 `member_of`（担当乐器/声部写 `credit_role`） |
-| `voiced_by` | 配音者 ↔ 配音于 | `work`\|`content_unit`\|`expression`\|`release`\|`agent` -> `agent` | 声优/配音；在作品/表达上带 `attributes.character` 与 `language`，也可在角色 `agent -> cv agent` 上记录固定声优 |
-| `character_in` | 角色登场 ↔ 登场角色 | `agent` -> `work`\|`collection` | `participant_slot=character`；虚构角色登场，番位填枚举 `character_rank`（不借 `credit_role` 写番位） |
-| `illustrated_by` | 插画者 ↔ 绘制了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 小说插画、角色原案、封面绘制、原画设计 |
+| `performed_by` | 表演者 ↔ 表演了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 演唱、演奏、乐队/组合表演、公演登台演出；团体成员归属另建 `member_of`（担当乐器/声部写 `credit_role`） |
+| `voiced_by` | 配音者 ↔ 配音于 | `work`\|`content_unit`\|`expression`\|`release`\|`agent`\|`event` -> `agent` | 声优/配音；在作品/表达/活动上带 `attributes.character` 与 `language`，也可在角色 `agent -> cv agent` 上记录声优任期（换代填 `begin_date`/`end_date`/`ended`） |
+| `character_in` | 角色登场 ↔ 登场角色 | `agent` -> `work`\|`collection`\|`event` | `participant_slot=character`；虚构角色登场，番位填枚举 `character_rank`（不借 `credit_role` 写番位） |
+| `illustrated_by` | 插画者 ↔ 绘制了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 小说插画、角色原案、封面/活动主视觉绘制、原画设计 |
 | `developed_by` | 开发者 ↔ 开发了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 游戏/软件开发团队或程序开发 |
-| `photographed_by` | 摄影者 ↔ 拍摄了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 写真摄影、影像摄影监督 |
-| `modeled_by` | 出镜者 ↔ 出镜于 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 写真模特、真人出镜演员 |
-| `narrated_by` | 朗读 / 旁白 ↔ 朗读了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 有声书朗读、旁白 |
+| `photographed_by` | 摄影者 ↔ 拍摄了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 写真摄影、影像摄影监督、现场摄影 |
+| `modeled_by` | 出镜者 ↔ 出镜于 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 写真模特、真人出镜演员 |
+| `narrated_by` | 朗读 / 旁白 ↔ 朗读了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 有声书朗读、旁白、现场朗读 |
 | `translated_by` | 译者 ↔ 翻译了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 文本或字幕翻译 |
-| `credit_for` | 参与主体 ↔ 参与记录 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | **兜底署名**：仅当以上 16 条专用署名均不适用时使用（如音响监督、美术监督、色彩设计、剪辑、分镜、单集演出、录音/混音工程等），必须填 `credit_role` 原文；**严禁与专用关系对同一职责重复建边** |
+| `credit_for` | 参与主体 ↔ 参与记录 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | **兜底署名**：仅当以上 16 条专用署名均不适用时使用（如音响监督、美术监督、色彩设计、剪辑、分镜、单集演出、录音/混音工程等），必须填 `credit_role` 原文；**严禁与专用关系对同一职责重复建边** |
 
-### 创作关系组 `creative`（9 条，`acyclic=true`，`participant_slot=peer`）
+### 创作关系组 `creative`（10 条，`acyclic=true`，`participant_slot=peer`）
 
 | 关系 `code` | 正向 ↔ 反向名称 | `source_kinds -> target_kinds` | 方向与语义说明 |
 | --- | --- | --- | --- |
@@ -41,13 +41,17 @@
 | `cover_of` | 翻唱自 ↔ 被翻唱为 | `expression` -> `expression` | 翻唱 / 重编版本表达 → 原版表达 |
 | `alternate_take_of` | 别版取自 ↔ 被用作别版 | `expression` -> `expression` | 别版 / 异录表达 → 基准表达 |
 | `pressing_of` | 再版自 ↔ 被再版为 | `release` -> `release` | 再版 / 复刻发行 → 初版 / 原发行（不表示内容收录） |
+| `recorded_at` | 录制 / 演出于 ↔ 现场收录作品 | `work`\|`content_unit`\|`expression` -> `event` | 现场录音、公演映像或初演作品 → 对应演出 / 直播 `event` |
 
-### 组成与成员组 `membership`（6 条）
+### 组成与成员组 `membership`（9 条）
 
 | 关系 `code` | 正向 ↔ 反向名称 | `source_kinds -> target_kinds` | 附加约束 | 适用说明 |
 | --- | --- | --- | --- | --- |
-| `includes` | 组成包含 ↔ 组成属于 | `collection`\|`work` -> `work`\|`collection` | `aggregate=true`, `acyclic=true`, `participant_slot=peer` | 跨媒体企划/作品系列 `collection` 收录各季动画、剧场版、游戏、漫画、音乐作品，或专辑/单曲 `work` 包含曲目 `song` `work` |
-| `member_of` | 所属团体 ↔ 成员 | `agent` -> `agent` | `acyclic=true`, `participant_slot=peer` | 个人成员 → 乐队 / 组合 / 社团；担当声部/乐器（如 `Vo. & Gt.`）写 `credit_role`，在籍期写 `begin_date`/`end_date` |
+| `includes` | 组成包含 ↔ 组成属于 | `collection`\|`work`\|`event` -> `work`\|`collection`\|`event` | `aggregate=true`, `acyclic=true`, `participant_slot=peer` | 跨媒体企划/系列 `collection` 收录旗下 `work`，专辑/单曲 `work` 包含 `song` `work`，或巡演/大型展会 `event` 包含分场次 `event` |
+| `member_of` | 所属团体 ↔ 成员 | `agent` -> `agent` | `acyclic=true`, `participant_slot=peer` | 个人成员 → 乐队 / 组合 / 社团；担当声部/乐器写 `credit_role`，在籍期写 `begin_date`/`end_date`/`ended`（多次进出可建多条不同区间边） |
+| `subsidiary_of` | 上级机构 ↔ 下属机构 | `agent` -> `agent` | `acyclic=true`, `cycle_group=org_hierarchy`, `participant_slot=peer` | 子公司 / 内部厂牌 / 分支部门 → 母公司 / 上级机构；隶属变动期写 `begin_date`/`end_date`/`ended`（股权/归属转移时旧母公司设 `end_date`/`ended=true`，新母公司另建新区间边） |
+| `succeeded_by` | 后继主体 ↔ 前身主体 | `agent` -> `agent` | `acyclic=true`, `cycle_group=agent_succession`, `participant_slot=peer`, 额外字段 `transition_type` | 前身主体 → 合并/收购/拆分/权利承继后的独立后继主体；`attributes.transition_type` 填 `rename`/`merger`/`acquisition`/`split`/`transfer`（同一主体单纯改名不拆新 `agent`，写 `former_names`） |
+| `released_at` | 首发 / 颁布于活动 ↔ 首发 / 颁布发行版 | `release` -> `event` | `acyclic=true`, `participant_slot=peer` | 同人即卖会、展会或演唱会现场首发/限定颁布的 `release` → 对应 `event` |
 | `expression_part` | 表达包含 ↔ 所属整体表达 | `expression` -> `expression` | `usage=expression_composition`, `scope=work`, `aggregate=true`, `unique_position=true`, `acyclic=true`, `cycle_group=expression_composition`, `fields=[]`, `participant_slot=peer` | 同 `work` 内整体表达有序包含部分表达 |
 | `edition_of` | 发行组归属 ↔ 发行版本 | `release` -> `work`\|`collection` | `usage=release_group`, `max_outgoing=1`, `fields=[]`, `participant_slot=peer` | 显式声明发行版所属版本组 |
 | `bonus_included_in` | 特典收录于 ↔ 收录特典 | `expression` -> `release`\|`medium` | `acyclic=true`, `participant_slot=peer` | 特典表达归属对应发行或载体 |
@@ -71,9 +75,13 @@
 | `credit_role` | text | **职位原文**（"音楽""Animation Production"…），任意署名关系的自由文本落点 |
 | `character_rank` | enum `character_rank` | `main` / `supporting` / `guest` / `ensemble` / `narrator` / `cameo` |
 | `character` | entity → **`agent`** | 配音/出演的角色（角色本身也是 agent） |
-| `context` | entity → `work`\|`content_unit`\|`expression`\|`release` | 该署名适用于哪部作品/哪个篇目 |
+| `context` | entity → `work`\|`content_unit`\|`expression`\|`release`\|`event` | 该署名或关系适用的具体作品/篇目/活动语境 |
 | `language` | text | 该署名对应的语言版本（`ja` / `zh-CN`…） |
-| `begin_date` / `end_date` | date | 这条关系成立的任期或期间 |
+| `begin_date` / `end_date` | date | 关系成立的起止日期（同时填写时 `end_date >= begin_date`） |
+| `ended` | boolean | 关系已终止标记（不知确切结束日但确认已退团/脱离隶属/卸任时设 `true`） |
+| `date_precision` | enum `date_precision` | `exact` / `circa` / `inferred` / `disputed` |
+| `earliest_date` / `latest_date` | date | 关系起止日期不确定时的考据上下界（同时填写时 `latest_date >= earliest_date`） |
+| `transition_type` | enum `transition_type` | 仅 `succeeded_by` 允许：`rename` / `merger` / `acquisition` / `split` / `transfer` |
 | `scope` | text | 适用范围说明的自由文本 |
 
 惯例两例：

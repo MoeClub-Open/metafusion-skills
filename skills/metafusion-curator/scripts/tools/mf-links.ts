@@ -2,7 +2,8 @@ import { request } from "../metafusion-api.ts";
 
 const LINK_DIRECTIONS = new Set(["both", "outgoing", "incoming"]);
 const LINK_CLASSES = new Set(["ownership", "placement", "inclusion", "semantic", "reference"]);
-const LINK_KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track"]);
+const LINK_KINDS = new Set(["agent", "collection", "work", "content_unit", "expression", "release", "medium", "track", "event"]);
+const PARTIAL_DATE_RE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/;
 
 function normalizeListParam(value: unknown, allowed?: Set<string>): string[] | null {
   const raw = typeof value === "string" ? value.split(",").map((s) => s.trim()).filter(Boolean) : Array.isArray(value) ? value : null;
@@ -20,13 +21,15 @@ function normalizeListParam(value: unknown, allowed?: Set<string>): string[] | n
 export function validateLinkParams(params: unknown): string | null {
   if (params === undefined) return null;
   if (!params || typeof params !== "object" || Array.isArray(params)) return "invalid_link_params";
-  const allowedKeys = new Set(["direction", "classes", "rule_codes", "peer_kinds"]);
+  const allowedKeys = new Set(["direction", "classes", "rule_codes", "peer_kinds", "active_only", "as_of"]);
   for (const [key, val] of Object.entries(params as Record<string, unknown>)) {
     if (!allowedKeys.has(key) || val === undefined) return "invalid_link_params";
     if (key === "direction" && (typeof val !== "string" || !LINK_DIRECTIONS.has(val))) return "invalid_link_params";
     if (key === "classes" && !normalizeListParam(val, LINK_CLASSES)) return "invalid_link_params";
     if (key === "peer_kinds" && !normalizeListParam(val, LINK_KINDS)) return "invalid_link_params";
     if (key === "rule_codes" && !normalizeListParam(val)) return "invalid_link_params";
+    if (key === "active_only" && typeof val !== "boolean") return "invalid_link_params";
+    if (key === "as_of" && (typeof val !== "string" || !PARTIAL_DATE_RE.test(val.trim()))) return "invalid_link_params";
   }
   return null;
 }
@@ -41,6 +44,8 @@ function buildLinksQuery(params: Record<string, unknown> | undefined, offset: nu
         if (list?.length) sp.set(key, list.join(","));
       }
     }
+    if (params.active_only === true) sp.set("active_only", "true");
+    if (typeof params.as_of === "string" && params.as_of.trim()) sp.set("as_of", params.as_of.trim());
   }
   sp.set("limit", "100");
   sp.set("offset", String(offset));

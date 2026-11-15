@@ -7,8 +7,8 @@
 | 操作 | MCP 工具 |
 | --- | --- |
 | 契约、通用 API 与锁定手册 | `metafusion_api_contract`、`metafusion_api_call`（动态定义读 `/api/catalog/definitions`）、`metafusion_reference`（返回部署实际锁定的 revision） |
-| 检索与批量读取实体 | `metafusion_search`（顶层检索建议传 `kinds=work,release,agent,collection`；支持 `query.fields` 按需筛选返回字段，自动内联 `cover_url`）、`metafusion_entities_batch`（1–100 个 UUID 单次快照读取；支持可选 `fields`、`locales`、`attribute_keys`、`include_body` 按需裁剪） |
-| 关系分页与多跳图读取 | `metafusion_relationships`（每条关系边已内联 `peer_id`/`peer_kind`/`peer_title`，默认 `include_entities=false` 省略顶层重复 `entities` 字典）、`catalog_graph_read`（1–3 跳自动翻页合并；均支持 `classes`、`direction`、`rule_codes`、`peer_kinds` 裁剪） |
+| 检索与批量读取实体 | `metafusion_search`（顶层检索建议传 `kinds=work,release,agent,collection,event`；支持 `query.fields` 按需筛选返回字段，自动内联 `cover_url`）、`metafusion_entities_batch`（1–100 个 UUID 单次快照读取；支持可选 `fields`、`locales`、`attribute_keys`、`include_body` 按需裁剪） |
+| 关系分页与多跳图读取 | `metafusion_relationships`（每条关系边已内联 `peer_id`/`peer_kind`/`peer_title`，默认 `include_entities=false` 省略顶层重复 `entities` 字典）、`catalog_graph_read`（1–3 跳自动翻页合并；均支持 `classes`、`direction`、`rule_codes`、`peer_kinds`、`active_only`、`as_of` 裁剪） |
 | 查重候选与批量身份核查 | `metafusion_candidates`、`catalog_identity_check`（1–50 条批量查重；默认含 `core_title` 核心题名匹配 `title_core`，传 `include_approximate: true` 启用子串与 `pg_trgm` 近似召回 `title_similar`；主分类冲突标 `agent_type_mismatch`/`creation_form_mismatch`/`collection_type_mismatch` 并建议 `distinct`；可选 `context` 仅调整排序与置信度，从不过滤同名候选） |
 | 质量诊断与外部源只读查询 | `catalog_quality_audit`（1–100 个实体即时诊断，不阻塞编辑）、`external_source_query`（Bangumi/DLsite/DMM 只读查询，支持可选 `include_raw` 默认 `false` 省略重复原始载荷、`include_preview` 默认 `true`） |
 | 全网搜索、公开 HTTP 与 Wiki | `metafusion_web_search`、`metafusion_http_request`（不带平台凭据、不自动跟随重定向）、`metafusion_wiki`（Wikipedia/萌娘百科原文与许可） |

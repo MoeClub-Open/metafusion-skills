@@ -10,8 +10,9 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import UUID
 
-KINDS = ('agent', 'collection', 'work', 'content_unit', 'expression', 'release', 'medium', 'track')
+KINDS = ('agent', 'collection', 'work', 'content_unit', 'expression', 'release', 'medium', 'track', 'event')
 CLASSES = ('ownership', 'placement', 'inclusion', 'semantic', 'reference')
+PARTIAL_DATE_RE = re.compile(r'^\d{4}(?:-\d{2}(?:-\d{2})?)?$')
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -65,6 +66,8 @@ def main(argv=None):
     parser.add_argument('--class', action='append', default=[], dest='classes', choices=CLASSES, help='Relationship class filter; repeat to combine')
     parser.add_argument('--rule-code', action='append', default=[])
     parser.add_argument('--peer-kind', action='append', default=[], choices=KINDS)
+    parser.add_argument('--active-only', action='store_true', help='Exclude ended semantic relations')
+    parser.add_argument('--as-of', default='', help='Point-in-time semantic filter (YYYY, YYYY-MM, or YYYY-MM-DD)')
     parser.add_argument('--limit', type=int, default=25)
     parser.add_argument('--offset', type=int, default=0)
     parser.add_argument('--timeout', type=int, default=30)
@@ -76,7 +79,10 @@ def main(argv=None):
         parser.error('--timeout must be between 1 and 120 seconds')
     if not 1 <= args.limit <= 100 or args.offset < 0:
         parser.error('--limit must be 1..100 and --offset must be nonnegative')
-    if args.rules and (args.ids or args.classes or args.rule_code or args.peer_kind or args.direction != 'both' or args.offset):
+    as_of = args.as_of.strip()
+    if as_of and not PARTIAL_DATE_RE.fullmatch(as_of):
+        parser.error('--as-of must be YYYY, YYYY-MM or YYYY-MM-DD')
+    if args.rules and (args.ids or args.classes or args.rule_code or args.peer_kind or args.active_only or as_of or args.direction != 'both' or args.offset):
         parser.error('--rules cannot be combined with entity-query filters')
     try:
         if args.rules:
@@ -98,6 +104,10 @@ def main(argv=None):
                 payload['rule_codes'] = unique(args.rule_code)
             if args.peer_kind:
                 payload['peer_kinds'] = unique(args.peer_kind)
+            if args.active_only:
+                payload['active_only'] = True
+            if as_of:
+                payload['as_of'] = as_of
             result = request(args.base_url, '/api/catalog/relationships/query', payload, args.timeout)
             if not isinstance(result, dict) or not isinstance(result.get('pages'), list) or not isinstance(result.get('entities'), dict) or not isinstance(result.get('unavailable_ids'), list) or not isinstance(result.get('definition_etag'), str):
                 raise ValueError('Relationship query response does not match the endpoint contract.')

@@ -183,13 +183,16 @@ class RelationshipQueryHTTPTests(unittest.TestCase):
         status, out, err = self.invoke('--id', RELEASE1, '--id', RELEASE1,
             '--direction', 'outgoing', '--class', 'ownership', '--class', 'ownership',
             '--rule-code', 'structure:release_medium',
-            '--rule-code', 'structure:release_medium', '--peer-kind', 'medium', '--peer-kind', 'medium')
+            '--rule-code', 'structure:release_medium', '--peer-kind', 'medium', '--peer-kind', 'medium',
+            '--active-only', '--as-of', '2020-05')
         self.assertEqual(status, 0, err)
         payload = self.requests[-1][1]
         self.assertEqual(payload['ids'], [RELEASE1])
         self.assertEqual(payload['classes'], ['ownership'])
         self.assertEqual(payload['rule_codes'], ['structure:release_medium'])
         self.assertEqual(payload['peer_kinds'], ['medium'])
+        self.assertEqual(payload['active_only'], True)
+        self.assertEqual(payload['as_of'], '2020-05')
         edge = json.loads(out)['pages'][0]['items'][0]
         self.assertEqual(edge['direction'], 'outgoing')
         self.assertEqual(edge['source_id'], RELEASE1)
@@ -259,7 +262,8 @@ class RelationshipQueryHTTPTests(unittest.TestCase):
     def test_invalid_cli_parameters_make_no_http_requests(self):
         for args in (('--id', 'bad'), ('--id', EXPRESSION, '--limit', '101'),
                      ('--id', EXPRESSION, '--offset', '-1'), ('--rules', '--id', EXPRESSION),
-                     ('--id', EXPRESSION, '--class', 'unknown'), ('--rules', '--class', 'semantic')):
+                     ('--id', EXPRESSION, '--class', 'unknown'), ('--rules', '--class', 'semantic'),
+                     ('--id', EXPRESSION, '--as-of', '2020/05/01'), ('--rules', '--active-only')):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as failure:
                     self.invoke(*args)

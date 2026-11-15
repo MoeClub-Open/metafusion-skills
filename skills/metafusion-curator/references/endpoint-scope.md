@@ -4,7 +4,7 @@
 
 | 服务 | 职责与入口 |
 | --- | --- |
-| 目录 | 八类实体、关系、结构、工作副本、commit、PR、修订与贡献：`/api/catalog/*`、`/api/users/{id}/contributions`；动态定义与目录配置使用对应 `/api/admin/*` |
+| 目录 | 九类实体、关系、结构、工作副本、commit、PR、修订与贡献：`/api/catalog/*`、`/api/users/{id}/contributions`；动态定义与目录配置使用对应 `/api/admin/*` |
 | 账号 | 用户、会话、OAuth、PAT 与用户管理：`/api/auth/*`、`/api/oauth/*`、`/api/users/{id}`、`/api/admin/users*` |
 | 社区 | 论坛、评论、收藏和私信：`/api/community/*`、`/api/favorites/*`、`/api/messages/*`、用户 favorites/stats |
 | 存储 | 文件、上传、绑定和下载：`/api/storage/*` |

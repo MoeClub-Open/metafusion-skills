@@ -338,6 +338,7 @@ test("审计保留真实断链/覆盖问题和未知项，不把可选篇目引�
       ],
       agent: [],
       collection: [],
+      event: [],
     };
     globalThis.fetch = async (url, init = {}) => {
       assert.equal(init.method || "GET", "GET");

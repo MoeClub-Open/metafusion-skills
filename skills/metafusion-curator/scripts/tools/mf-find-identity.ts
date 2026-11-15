@@ -12,6 +12,7 @@ const KINDS = new Set([
   "release",
   "medium",
   "track",
+  "event",
 ]);
 const DEFAULT_LIMIT = 1000;
 const CORP_AFFIX_RE =
@@ -121,7 +122,7 @@ function validateInput({
   limit = DEFAULT_LIMIT,
   approximate = false,
 }: Record<string, any>) {
-  if (!KINDS.has(kind)) throw new Error("kind 必须是八种实体 kind 之一");
+  if (!KINDS.has(kind)) throw new Error("kind 必须是九种实体 kind 之一");
   const normalizedWorkId = cleanText(workId);
   const normalizedReleaseId = cleanText(releaseId),
     normalizedMediumId = cleanText(mediumId);

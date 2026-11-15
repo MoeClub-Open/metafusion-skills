@@ -61,7 +61,7 @@ const SOURCES_FILE = opt("--sources");
 const mergeSources = SOURCES_FILE ? JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8")) : [];
 if (!Array.isArray(mergeSources)) throw new Error("invalid_sources");
 // 依赖顺序：先表达，再篇章/载体/曲目
-const ORDER = ["expression", "content_unit", "medium", "track", "work", "release", "collection", "agent"];
+const ORDER = ["expression", "content_unit", "medium", "track", "work", "release", "collection", "agent", "event"];
 
 const log = [];
 const out = `${auditOutputDirectory()}/mf-merge-${APPLY ? "applied" : "dryrun"}.json`;
@@ -79,7 +79,7 @@ async function handlePair(kind, keepId, loseId, scopeNote) {
   if (keep.state !== "active") { skipped += 1; log.push({ kind, keepId, loseId, result: `skip: 保留方 state=${keep.state}（须 active）` }); return; }
 
   const note = scopeNote ?? `${kind} 同作用域`;
-  if (kind !== "work" && kind !== "agent" && kind !== "collection") {
+  if (!["work", "agent", "collection", "event"].includes(kind)) {
     if (scopeKey(kind, keep) !== scopeKey(kind, lose)) {
       skipped += 1; log.push({ kind, keepId, loseId, result: "skip: 作用域不同" }); return;
     }

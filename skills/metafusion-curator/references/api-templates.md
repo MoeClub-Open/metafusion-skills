@@ -129,7 +129,7 @@ POST /api/catalog/workspaces/{id}/rebase
 
 | kind | 结构字段 |
 | --- | --- |
-| agent / collection / work | 没有固定父级 |
+| agent / collection / work / event | 没有固定父级 |
 | content_unit | 必须 work_id，可有同 Work 的 parent_id |
 | expression | 必须 work_id，可有同 Work 的 content_unit_id；没有 parent_id |
 | release | subjects 声明 Work，没有 work_id |

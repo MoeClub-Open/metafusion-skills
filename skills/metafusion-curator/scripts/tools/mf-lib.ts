@@ -30,6 +30,7 @@ export const KINDS = [
   "release",
   "medium",
   "track",
+  "event",
 ];
 
 /** 读取单个实体；404 返回 null，其它非 200 一律抛错。 */

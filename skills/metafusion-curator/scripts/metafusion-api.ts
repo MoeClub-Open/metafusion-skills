@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 // Transport JSON is validated by each operation before it becomes catalog data.
 export type JsonObject = Record<string, any>;
 export type EntityState = "active" | "deleted" | "merged";
-export type EntityKind = "agent" | "collection" | "work" | "content_unit" | "expression" | "release" | "medium" | "track";
+export type EntityKind = "agent" | "collection" | "work" | "content_unit" | "expression" | "release" | "medium" | "track" | "event";
 export interface CatalogEntity {
   id: string;
   kind: EntityKind;

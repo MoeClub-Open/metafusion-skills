@@ -2,7 +2,7 @@
 
 创作与发行分开；字段/关系以实例当前 definitions 为准。命名见 [LRM 规范](../../lrm-catalog-standards/SKILL.md)，请求见 [API 载荷](api-templates.md)。
 
-## 八种实体
+## 九种实体
 
 ```text
 Agent：个人 / 团体 / 机构 / 虚构角色（attributes.agent_type）
@@ -14,12 +14,14 @@ Release：具体发行（edition_type / edition_batch / distribution_channel / p
 └── Medium：盘 / 卷 / 文件集（attributes.format + role）
     └── Track：容器内位置（attributes.role）
         └── contents[] → Expression（position、locator、sources）
+Event：独立活动（attributes.event_type：演唱会 / 巡演 / 音乐节 / 展会 / 舞台剧 / 奖项等），经 recorded_at / released_at / includes / 署名关联
 ```
 
 - **主分类字段边界**：
-  - `Agent` 通过 `attributes.agent_type`（`person` / `group` / `organization` / `character`）区分主体子类型。
-  - `Collection` 通过 `attributes.collection_type`（`franchise` 跨媒体企划 / `series` 作品系列 / `anthology` 选集丛书 / `event_catalog` 展会活动特辑）区分集合性质；跨媒体企划（`franchise`）或系列（`series`）通过语义关系 `includes`（`collection|work -> work|collection`）聚合旗下各季 TV 动画、剧场动画、OVA/ONA、游戏、漫画、小说及企划音乐 `Work`。
+  - `Agent` 通过 `attributes.agent_type`（`person` / `group` / `organization` / `character`）区分主体子类型；改名历史填 `former_names`，分段活动期填 `activity_periods`，机构隶属与继承拆并走 `subsidiary_of` / `succeeded_by`。
+  - `Collection` 通过 `attributes.collection_type`（`franchise` 跨媒体企划 / `series` 作品系列 / `anthology` 选集丛书 / `event_catalog` 展会活动特辑）区分集合性质；跨媒体企划（`franchise`）或系列（`series`）通过语义关系 `includes`（`collection|work|event -> work|collection|event`）聚合旗下各季 TV 动画、剧场动画、OVA/ONA、游戏、漫画、小说及企划音乐 `Work`。
   - `Work` 通过 `attributes.creation_form` 表达创作形态：单首乐曲建 `Work` 时填 `song`（仅作为曲目被收录时**绝不填** `original_album` 或 `single`）；有独立创作/企划身份的单曲、EP、原创专辑、同人专辑、原声集、精选集分别建 `Work` 并填 `single` / `ep` / `original_album` / `doujin_album` / `soundtrack` / `compilation_album`，经 `includes` 包含各首 `song` `Work`。同名主打歌 `Work`（`song`）与同名标题单曲/专辑 `Work`（`single` / `original_album`）按各自身份独立存在。
+  - **双层事件模型**：多主体/多作品共用的演唱会、巡演、音乐节、展会（如 Comiket）、颁奖礼建顶层 `Event`（`attributes.event_type`），巡演与分场次用 `includes`（`event -> event`），现场录音/映像用 `recorded_at`（`work|content_unit|expression -> event`），展会首发/颁布盘用 `released_at`（`release -> event`）；仅属于单个 `Work`/`Expression`/`Release` 的发售、首播、重印、预售、停售等里程碑写内嵌 `attributes.events[]`（需要关联顶层活动时填子字段 `event`）。
 - `Release` 读取响应附带只读聚合 `medium_formats`（按活动子 `medium` 汇总 `format` 频次），不落库、不进快照。文件、哈希、对象键与下载地址属于[存储服务](file-upload.md)，不写入创作题名或目录属性。
 - **新建前近似查重（Agent 硬规）**：执行任何 `action: "create"` 前，必须启用近似匹配查询身份候选（本地 `mf-find-identity.ts --approximate`，MCP `catalog_identity_check` / `metafusion_candidates` 传 `include_approximate: true`），核查 `assessment`（`reuse|review|distinct`、`title_core`、`title_similar` 及主分类冲突）并回读候选详情与关联边后再决定复用或新建。
 
@@ -64,6 +66,7 @@ Work 唯一不代表 Expression 唯一；录音室、现场、伴奏、混音按
 | 动画 | Work + 有证据的分集 ContentUnit/Expression；真实蓝光/DVD/数字版建 Release、盘建 Medium、收录位置建 Track。盘数不生成“盘作品” |
 | 音乐 | 单首乐曲建 `Work`（`creation_form="song"`），单曲/EP/专辑企划建独立 `Work`（`single` / `ep` / `original_album` / `doujin_album` / `soundtrack` / `compilation_album`）并经 `includes` 包含各首 `song` `Work`；具体录音 `Expression` 归属对应 `song` `Work`。发行 `subjects` 覆盖专辑（`primary`/`compilation`）及实际收录歌曲（`track_work`），CD/黑胶/精选复用同一录音；MV（`music_video`）/现场特典盘建真实载体与表达 |
 | 图书/漫画 | 有目录证据才建 ContentUnit；单行本/精装/电子版各自 Release。章节表达跨版复用，页码留在本版 locator；整本/章节原文与译文用表达组成和 translation_of 关联，实际出版顺序走 Track/contents |
+| 演出/展会 | 演唱会、巡演、即卖会建顶层 `Event`（巡演经 `includes` 聚合各场 `Event`），出演者挂 `performed_by`/`voiced_by` 等署名，现场录音 `Expression` 建 `recorded_at -> Event`，会场首发盘 `Release` 建 `released_at -> Event` |
 
 电影本体与同名 OST 都可能是 Work；按内容、责任主体与来源区分，标签不单独判身份。仅重排/定位变化复用内容，真实章节拆合或内容修订再区分 ContentUnit/Expression。
 
