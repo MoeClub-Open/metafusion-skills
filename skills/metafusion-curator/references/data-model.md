@@ -10,18 +10,20 @@ Collection：跨媒体企划 / 作品系列 / 选集 / 展会特辑（attributes
 Work：创作身份与正式题名（attributes.creation_form 区分 song 与单曲/专辑/动画/游戏等）
 ├── ContentUnit：同 Work 的章 / 集 / 篇目（attributes.entry_role），parent_id 构成目录树
 └── Expression：可复用正文 / 译文 / 录音 / 正片版本（attributes.version_label）
-Release：具体发行（edition_type / edition_batch / distribution_channel / packaging / publisher），经 subjects 声明 Work
+Release：独立地区 / 平台 / 渠道 / 版本发行（edition_type / edition_batch / distribution_channel / release_status / publisher / operator），经 subjects 声明 Work
 └── Medium：盘 / 卷 / 文件集（attributes.format + role）
     └── Track：容器内位置（attributes.role）
         └── contents[] → Expression（position、locator、sources）
-Event：独立活动（attributes.event_type：演唱会 / 巡演 / 音乐节 / 展会 / 舞台剧 / 奖项等），经 recorded_at / released_at / includes / 署名关联
+Event：跨实体活动与里程碑（attributes.event_type / target_ids / related_assets），经 recorded_at / released_at / includes / 署名及时间线索引关联
 ```
 
-- **主分类字段边界**：
+- **主分类、发行归属与时态重建边界**：
+  - `Work` 与 `Release` 职责分离：`Work` 只放作品身份、研发（`developed_by`）、创作署名及跨市场通用事实；每个具有独立发行身份的地区、平台、渠道或版本建独立 `Release`（填写 `country`、`platform`、`distribution_channel`、`channel`、`edition_date`、`release_status`），发行商与运营商挂 `Release`（`publisher` / `operator` 及多值带 `[valid_from, valid_to)` 的 `published_by` / `operated_by`），普通版本补丁、活动更新或仅更换图标不拆新 `Release`。
+  - 追加式图片与全维度时态事实：`pictures[]` 追加保留全部历史封面、`key_visual`、`logo` 与 `app_icon`（替换时关闭旧项 `valid_to` 并前置新项，不删旧资产）；九类实体共通 `former_names` 与 `attribute_history`（含 `release_status`），配合 `external_links` 与语义关系的 `[valid_from, valid_to)` 左闭右开区间及范围字段，供 `/timeline`、`/as-of`、`/compare`、`/pictures` 重建任意时点状态，未知历史区间保留为空而不倒填现值。
   - `Agent` 通过 `attributes.agent_type`（`person` / `group` / `organization` / `character`）区分主体子类型；改名历史填 `former_names`，分段活动期填 `activity_periods`，机构隶属与继承拆并走 `subsidiary_of` / `succeeded_by`。
   - `Collection` 通过 `attributes.collection_type`（`franchise` 跨媒体企划 / `series` 作品系列 / `anthology` 选集丛书 / `event_catalog` 展会活动特辑）区分集合性质；跨媒体企划（`franchise`）或系列（`series`）通过语义关系 `includes`（`collection|work|event -> work|collection|event`）聚合旗下各季 TV 动画、剧场动画、OVA/ONA、游戏、漫画、小说及企划音乐 `Work`。
   - `Work` 通过 `attributes.creation_form` 表达创作形态：单首乐曲建 `Work` 时填 `song`（仅作为曲目被收录时**绝不填** `original_album` 或 `single`）；有独立创作/企划身份的单曲、EP、原创专辑、同人专辑、原声集、精选集分别建 `Work` 并填 `single` / `ep` / `original_album` / `doujin_album` / `soundtrack` / `compilation_album`，经 `includes` 包含各首 `song` `Work`。同名主打歌 `Work`（`song`）与同名标题单曲/专辑 `Work`（`single` / `original_album`）按各自身份独立存在。
-  - **双层事件模型**：多主体/多作品共用的演唱会、巡演、音乐节、展会（如 Comiket）、颁奖礼建顶层 `Event`（`attributes.event_type`），巡演与分场次用 `includes`（`event -> event`），现场录音/映像用 `recorded_at`（`work|content_unit|expression -> event`），展会首发/颁布盘用 `released_at`（`release -> event`）；仅属于单个 `Work`/`Expression`/`Release` 的发售、首播、重印、预售、停售等里程碑写内嵌 `attributes.events[]`（需要关联顶层活动时填子字段 `event`）。
+  - **双层事件模型**：多主体/多作品共用的演唱会、巡演、音乐节、展会（如 Comiket）、颁奖礼或跨平台重大节点建顶层 `Event`（`attributes.event_type`、`target_ids`、`related_assets`），巡演与分场次用 `includes`（`event -> event`），现场录音/映像用 `recorded_at`（`work|content_unit|expression -> event`），展会首发/颁布盘用 `released_at`（`release -> event`）；仅属于单个条目的公布、测试、正式发行、版本更新、图标/封面更换、改名、发行/运营更替、停服、恢复运营等节点写内嵌 `attributes.events[]`（需要关联顶层活动时填子字段 `event`）。
 - `Release` 读取响应附带只读聚合 `medium_formats`（按活动子 `medium` 汇总 `format` 频次），不落库、不进快照。文件、哈希、对象键与下载地址属于[存储服务](file-upload.md)，不写入创作题名或目录属性。
 - **新建前近似查重（Agent 硬规）**：执行任何 `action: "create"` 前，必须启用近似匹配查询身份候选（本地 `mf-find-identity.ts --approximate`，MCP `catalog_identity_check` / `metafusion_candidates` 传 `include_approximate: true`），核查 `assessment`（`reuse|review|distinct`、`title_core`、`title_similar` 及主分类冲突）并回读候选详情与关联边后再决定复用或新建。
 

@@ -14,7 +14,7 @@
 
 ## 目录操作
 
-- 公共正常实体按可见性读取，列表不含 deleted/merged。历史 ID 用 `/api/catalog/entities/{id}/resolve`，完整 canonical entity 与 aliases 用 `/identity`。
+- 公共正常实体按可见性读取，列表不含 deleted/merged。历史 ID 用 `/api/catalog/entities/{id}/resolve`，完整 canonical entity 与 aliases 用 `/api/catalog/entities/{id}/identity`；统一事件时间线、按时点状态重建、两时点对比与范围图片分别读 `/api/catalog/entities/{id}/timeline`、`/api/catalog/entities/{id}/as-of`、`/api/catalog/entities/{id}/compare` 与 `/api/catalog/entities/{id}/pictures`。
 - 编辑使用 `/api/catalog/workspaces`，创建副本后 checkout、changes、commits、push/rebase；普通用户 push 发 PR，`catalog.review.bypass` 允许直接合入，`catalog.review.manage` 允许合并 PR。
 - 副本成员可共同编辑副本，但不能扩大其正式目录编辑权限。私有副本和未合入记录不会因为公开个人主页而变为公开。
 - 生命周期、definitions、货架、外部库注册与文件操作使用独立权限，不在副本提交中冒充跨服务原子操作。

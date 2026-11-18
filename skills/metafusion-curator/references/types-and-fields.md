@@ -15,15 +15,15 @@
 
 | 实体 `kind` | 主分类 / 核心标识字段 | 标准词项 `code` 与中文说明 | 同层级其他标准种子属性 / 结构 |
 | --- | --- | --- | --- |
-| `agent` | `attributes.agent_type`（enum `agent_type`） | `person`（个人）、`group`（团体 / 组合）、`organization`（机构 / 公司）、`character`（虚构角色） | `former_names`（`[{name, language?, begin_date?, end_date?, ended?, note?}]`）、`birth_date`（`allow_yearless: true`，支持 `--MM-DD`）、`death_date`、`formation_date`、`dissolution_date`、`date_precision`、`earliest_date`、`latest_date`、`occupations`（`string[]`）、`activity_periods`（`[{begin?, end?, ended?, note?}]`）、`tags` |
-| `collection` | `attributes.collection_type`（enum `collection_type`） | `franchise`（跨媒体企划）、`series`（作品系列）、`anthology`（选集 / 丛书）、`event_catalog`（展会 / 活动特辑） | `language`、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`tags`；成员作品用语义关系 `includes` 聚合 |
-| `work` | `attributes.creation_form`（enum `creation_form`） | 见下表 `creation_form` 完整词项表（区分单首乐曲 `song` 与单曲/专辑企划） | `language`、`edition_date`、`copyright`、`imdb`、`infobox`、`events`、`duration`、`duration_source`（`entity -> expression`）、`author`、`volume_count`、`magazine`、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`episodes`、`platform`、`broadcast_start`、`broadcast_weekday`、`broadcast_end`、`air_network`、`tags` |
-| `content_unit` | `attributes.entry_role`（enum `entry_role`） | `main`（本篇）、`opening`（片头曲）、`ending`（片尾曲）、`trailer`（预告 / 宣传）、`extra`（其它附加）、`other`（其它） | `air_date`（篇目级首播/发布日）、`language`、`tags`（无 `duration`；必填结构 `work_id`，可选 `parent_id`） |
-| `expression` | `attributes.version_label`（自由文本） | 自由文本，如 `录音室版`、`现场版`、`Instrumental`、`导演剪辑版` | `isrc`、`duration`、`language`、`events`、`tags`（必填结构 `work_id`，可选 `content_unit_id`） |
-| `release` | 正交枚举：`edition_type`、`edition_batch`、`distribution_channel`、`packaging` + `publisher`（`entity -> agent`） | 见下表 `release` 四维词项表 | `catalog_number`、`barcode`、`isbn`、`edition_date`、`country`、`platform`、`attachments`、`store_bonuses`、`events`、`tags`；结构字段 `Release.subjects[]`（`role` 取 `release_role`） |
-| `medium` | `attributes.format`（enum `format`）+ `attributes.role`（enum `role`） | `format`：`cd`（CD）、`bd`（蓝光）、`uhd_bd`（超高清蓝光）、`dvd`（DVD）、`vinyl`（黑胶）、`sacd`（SACD）、`cassette`（磁带）、`paper`（纸质册）、`digital`（数字文件集）、`web`（网络配信） | `catalog_number`、`tags`（必填结构 `release_id`，可选 `parent_id`） |
-| `track` | `attributes.role`（enum `role`） | 同下方 `role` 词表 | `duration`、`tags`；结构字段 `Track.contents[]`（必填结构 `medium_id`，可选 `parent_id`） |
-| `event` | `attributes.event_type`（enum `event_type`） | `concert`（演唱会 / 音乐会）、`tour`（巡回演出）、`festival`（音乐节 / 庆典）、`convention`（展会 / 同人即卖会）、`stage`（舞台剧 / 朗读剧）、`broadcast_event`（特别节目 / 直播活动）、`award`（奖项 / 颁奖礼）、`exhibition`（展览 / 联动展） | `venue`、`location`、`country`、`language`、`cancelled`（`boolean`）、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`time_zone`、`copyright`、`tags` |
+| `agent` | `attributes.agent_type`（enum `agent_type`） | `person`（个人）、`group`（团体 / 组合）、`organization`（机构 / 公司）、`character`（虚构角色） | `former_names`、`attribute_history`、`birth_date`（`allow_yearless: true`）、`death_date`、`formation_date`、`dissolution_date`、`date_precision`、`earliest_date`、`latest_date`、`occupations`（`string[]`）、`activity_periods`、`tags` |
+| `collection` | `attributes.collection_type`（enum `collection_type`） | `franchise`（跨媒体企划）、`series`（作品系列）、`anthology`（选集 / 丛书）、`event_catalog`（展会 / 活动特辑） | `language`、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`former_names`、`attribute_history`、`tags`；成员作品用语义关系 `includes` 聚合 |
+| `work` | `attributes.creation_form`（enum `creation_form`） | 见下表 `creation_form` 完整词项表（区分单首乐曲 `song` 与单曲/专辑企划） | `language`、`edition_date`、`copyright`、`imdb`、`infobox`、`events`、`former_names`、`attribute_history`、`duration`、`duration_source`（`entity -> expression`）、`author`、`volume_count`、`magazine`、`begin_date`、`end_date`、`ended`、`date_precision`、`earliest_date`、`latest_date`、`episodes`、`platform`、`broadcast_start`、`broadcast_weekday`、`broadcast_end`、`air_network`、`content_rating`、`tags` |
+| `content_unit` | `attributes.entry_role`（enum `entry_role`） | `main`（本篇）、`opening`（片头曲）、`ending`（片尾曲）、`trailer`（预告 / 宣传）、`extra`（其它附加）、`other`（其它） | `air_date`（篇目级首播/发布日）、`language`、`former_names`、`attribute_history`、`content_rating`、`tags`（无 `duration`；必填结构 `work_id`，可选 `parent_id`） |
+| `expression` | `attributes.version_label`（自由文本） | 自由文本，如 `录音室版`、`现场版`、`Instrumental`、`导演剪辑版` | `isrc`、`duration`、`language`、`events`、`former_names`、`attribute_history`、`content_rating`、`tags`（必填结构 `work_id`，可选 `content_unit_id`） |
+| `release` | 正交枚举：`edition_type`、`edition_batch`、`distribution_channel`、`release_status`、`packaging` + `publisher` / `operator`（`entity -> agent`） | 见下表 `release` 维度词项表 | `catalog_number`、`barcode`、`isbn`、`edition_date`、`country`、`platform`、`channel`、`attachments`、`store_bonuses`、`events`、`former_names`、`attribute_history`、`content_rating`、`tags`；结构字段 `Release.subjects[]`；多发行/运营主体走 `published_by` / `operated_by` |
+| `medium` | `attributes.format`（enum `format`）+ `attributes.role`（enum `role`） | `format`：`cd`、`bd`、`uhd_bd`、`dvd`、`vinyl`、`sacd`、`cassette`、`paper`、`digital`、`web` | `catalog_number`、`former_names`、`attribute_history`、`content_rating`、`tags`（必填结构 `release_id`，可选 `parent_id`） |
+| `track` | `attributes.role`（enum `role`） | 同下方 `role` 词表 | `duration`、`former_names`、`attribute_history`、`content_rating`、`tags`；结构字段 `Track.contents[]`（必填结构 `medium_id`，可选 `parent_id`） |
+| `event` | `attributes.event_type`（enum `event_type`） | 演出/展会词项及里程碑词项（`announcement`、`testing`、`official_release`、`version_update`、`visual_change`、`rename`、`publisher_change`、`operator_change`、`service_end`、`service_resume`、`major_event` 等） | `venue`、`location`、`country`、`region`、`platform`、`channel`、`scoped_release`、`target_ids`、`related_assets`、`language`、`cancelled`、`begin_date`、`end_date`、`ended`、`effective_at`、`date_precision`、`earliest_date`、`latest_date`、`time_zone`、`copyright`、`former_names`、`attribute_history`、`content_rating`、`tags` |
 
 ### `work` 创作形态词表（`creation_form`）与边界
 
@@ -47,8 +47,9 @@
 | `edition_type` | enum `edition_type` | `standard`（普通版）、`limited`（限定版）、`deluxe`（豪华版）、`boxset`（套盒） |
 | `edition_batch` | enum `edition_batch` | `regular`（通常发行）、`first_press`（初回发行）、`reissue`（再版 / 重发）、`reprint`（重印） |
 | `distribution_channel` | enum `distribution_channel` | `mixed`（混合）、`physical`（实体）、`digital`（数字）、`web`（网络配信） |
+| `release_status` | enum `release_status` | `announced`（已公布 / 待发行）、`testing`（测试中）、`released`（已发行）、`operating`（运营中）、`suspended`（暂停运营 / 下架）、`service_ended`（已停服）、`discontinued`（绝版 / 停售） |
 | `packaging` | enum `packaging` | `standard`（标准包装）、`jewel`（Jewel Case）、`slipcase`（腰封 / 外封套）、`box`（盒装）、`boxset`（套盒）、`digipak`（Digipak） |
-| `publisher` | `entity -> agent` | 指向出版商 / 唱片厂牌 `agent` 实体 UUID（禁止写字符串） |
+| `publisher` / `operator` | `entity -> agent` | 主发行商 / 主运营商 `agent` UUID（禁止写字符串）；联合发行商或发行/运营更替同时建立带 `[valid_from, valid_to)` 的 `published_by` / `operated_by` 关系 |
 
 四个枚举维度正交并存（例如日本初回限定实体 Digipak 盘可同时填 `edition_type="limited"`、`edition_batch="first_press"`、`distribution_channel="physical"`、`packaging="digipak"`、`country="JP"`）。
 
@@ -59,9 +60,9 @@
 | `release_role` | `Release.subjects[].role` | `primary`（主作品）、`track_work`（曲目作品）、`compilation`（汇编作品）、`supplement`（附加作品） |
 | `role` | `Medium.attributes.role`、`Track.attributes.role`、关系属性 `role` | `primary`（主要内容）、`supplement`（附加内容，标记为特典）、`side`（唱片面）、`extra`（额外收录）、`commentary`（解说音轨） |
 | `character_rank` | 关系属性 `character_rank`（主要用于 `character_in`） | `main`（主角）、`supporting`（配角）、`guest`（客串 / 单集登场）、`ensemble`（群像）、`narrator`（旁白）、`cameo`（彩蛋登场） |
-| `picture_role` | `Entity.pictures[].role`（`pictures[0]` 恒为主封面，不随 `role` 重排） | `key_visual`（主视觉）、`cover_art`（封面图）、`back_cover`（封底）、`booklet`（手册内页）、`disc_art`（盘面 / 载体图）、`obi`（侧标 / 腰封）、`packaging`（包装实拍）、`poster`（海报）、`character_portrait`（角色立绘）、`person_portrait`（人物肖像）、`logo`（标识）、`scene_still`（剧照 / 场景图）、`event_photo`（活动现场）、`scan`（内页扫描）、`screenshot`（界面截图） |
+| `picture_role` | `Entity.pictures[].role`（追加式管理；`pictures[0]` 为当前默认封面，更换时关闭旧项 `valid_to` 并前置新项） | `key_visual`（主视觉）、`cover_art`（封面图）、`app_icon`（应用图标）、`logo`（标识）、`back_cover`（封底）、`booklet`（手册内页）、`disc_art`（盘面 / 载体图）、`obi`（侧标 / 腰封）、`packaging`（包装实拍）、`poster`（海报）、`character_portrait`（角色立绘）、`person_portrait`（人物肖像）、`scene_still`（剧照 / 场景图）、`event_photo`（活动现场）、`scan`（内页扫描）、`screenshot`（界面截图） |
 | `date_precision` | 实体 / 关系 / `events[]` 的 `date_precision` | `exact`（精确）、`circa`（约略）、`inferred`（推定）、`disputed`（存疑）；不确定时间范围配合 `earliest_date` / `latest_date` 记录上下界，已知结束但缺具体结束日设 `ended: true` |
-| `embedded_event_kind` | `attributes.events[].event_kind` | `release`（发售 / 发行）、`broadcast`（放送 / 上映）、`reprint`（重印 / 再贩）、`preorder`（预售 / 预约）、`update`（版本更新）、`milestone`（里程碑）、`discontinued`（停售 / 停服）、`other`（其他） |
+| `embedded_event_kind` | `attributes.events[].event_kind` | `announcement`、`testing`、`official_release`、`version_update`、`visual_change`、`rename`、`publisher_change`、`operator_change`、`service_end`、`service_resume`、`major_event`、`release`、`broadcast`、`reprint`、`preorder`、`update`、`milestone`、`discontinued`、`other` |
 | `transition_type` | 语义关系 `succeeded_by` 的 `attributes.transition_type` | `rename`（独立名义承继）、`merger`（合并）、`acquisition`（收购 / 并购）、`split`（拆分 / 独立）、`transfer`（权利 / 业务移交） |
 | `credit_role` | 关系属性 `credit_role`（自由文本 `text`） | 保存来源中的原始职衔文本（如 `アニメーション制作`、`シリーズ構成`、`Vo. & Gt.`），仅作修饰说明，**绝不替代专用语义关系码** |
 

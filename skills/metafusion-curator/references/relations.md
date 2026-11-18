@@ -1,17 +1,19 @@
 # 语义关系码表、方向与消歧规则
 
-语义关系以目标实例 `GET /api/catalog/definitions` 的 `document.relations` 为运行时权威定义，支持管理员通过后台 GUI 或实例 seed 扩展关系码、允许端点与属性。方向一律固定为 `source -> target`（载荷 `source_id` 在左、`target_id` 在右）；同 `kind` 端点写反方向仍可能通过结构校验但语义相反，写入前必须核对方向。以下完整列出 36 条标准种子语义关系基线。
+语义关系以目标实例 `GET /api/catalog/definitions` 的 `document.relations` 为运行时权威定义，支持管理员通过后台 GUI 或实例 seed 扩展关系码、允许端点与属性。方向一律固定为 `source -> target`（载荷 `source_id` 在左、`target_id` 在右）；同 `kind` 端点写反方向仍可能通过结构校验但语义相反，写入前必须核对方向。以下完整列出 38 条标准种子语义关系基线。
 
-## 36 条标准语义关系基线
+## 38 条标准语义关系基线
 
-### 署名组 `credits`（17 条，`counts_as_credit=true`）
+### 署名组 `credits`（19 条，`counts_as_credit=true`）
 
-除 `character_in` 的 `participant_slot="character"` 外，其余 16 条均为 `participant_slot="person"`，默认 `acyclic=false`，均允许全部 13 个标准关系属性字段。
+除 `character_in` 的 `participant_slot="character"` 外，其余 18 条均为 `participant_slot="person"`，默认 `acyclic=false`，均允许全部 19 个标准关系属性字段（含 `valid_from`、`valid_to`、`region`、`platform`、`channel`、`scoped_release`）。
 
 | 关系 `code` | 正向 ↔ 反向名称 | `source_kinds -> target_kinds` | 适用边界与填写规则 |
 | --- | --- | --- | --- |
 | `created_by` | 原作 / 作者 ↔ 原作 / 著作 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | **严格仅限原作者、原案、著作人**；严禁用于动画制作公司、制作委员会、同人社团、游戏厂商或唱片厂牌 |
-| `produced_by` | 制作 / 出品 ↔ 制作了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 动画制作公司（`アニメーション制作`）、出品/制作委员会、制片人（`プロデューサー`）、音乐制作人、活动主办/协办、同人社团（`サークル`）、游戏品牌/厂商（`メーカー`）；具体原始职衔写 `credit_role`。发行版的出版/发行商优先写 `Release.attributes.publisher` |
+| `produced_by` | 制作 / 出品 ↔ 制作了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 动画制作公司（`アニメーション制作`）、出品/制作委员会、制片人（`プロデューサー`）、音乐制作人、活动主办/协办、同人社团（`サークル`）、游戏品牌/原作出品方；具体原始职衔写 `credit_role`。仅对某地区/渠道成立的发行商、运营商严禁挂 `Work.produced_by` |
+| `published_by` | 发行商 ↔ 发行了 | `release` -> `agent` | 发行版出版商、联合发行商或历史发行商更替（配合 `valid_from`/`valid_to`/`region`/`platform`/`channel`，主发行商同步维护 `Release.attributes.publisher`） |
+| `operated_by` | 运营商 ↔ 运营了 | `release` -> `agent` | 在线服务或地区发行的运营主体及运营移交（配合 `valid_from`/`valid_to`/`region`/`platform`/`channel`，主运营商同步维护 `Release.attributes.operator`） |
 | `directed_by` | 导演 ↔ 执导了 | `work`\|`content_unit`\|`expression`\|`event` -> `agent` | 总导演、导演/监督、舞台演出；单集演出无专用码时走 `credit_for` |
 | `written_by` | 编剧 ↔ 编写了 | `work`\|`content_unit`\|`expression`\|`event` -> `agent` | 系列构成、脚本、舞台/朗读剧剧本 |
 | `composed_by` | 作曲者 ↔ 作曲了 | `work`\|`content_unit`\|`expression` -> `agent` | 歌曲作曲、剧伴音乐作曲 |
@@ -26,7 +28,7 @@
 | `modeled_by` | 出镜者 ↔ 出镜于 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 写真模特、真人出镜演员 |
 | `narrated_by` | 朗读 / 旁白 ↔ 朗读了 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | 有声书朗读、旁白、现场朗读 |
 | `translated_by` | 译者 ↔ 翻译了 | `work`\|`content_unit`\|`expression`\|`release` -> `agent` | 文本或字幕翻译 |
-| `credit_for` | 参与主体 ↔ 参与记录 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | **兜底署名**：仅当以上 16 条专用署名均不适用时使用（如音响监督、美术监督、色彩设计、剪辑、分镜、单集演出、录音/混音工程等），必须填 `credit_role` 原文；**严禁与专用关系对同一职责重复建边** |
+| `credit_for` | 参与主体 ↔ 参与记录 | `work`\|`content_unit`\|`expression`\|`release`\|`event` -> `agent` | **兜底署名**：仅当以上 18 条专用署名均不适用时使用（如音响监督、美术监督、色彩设计、剪辑、分镜、单集演出、录音/混音工程等），必须填 `credit_role` 原文；**严禁与专用关系对同一职责重复建边** |
 
 ### 创作关系组 `creative`（10 条，`acyclic=true`，`participant_slot=peer`）
 
@@ -59,7 +61,7 @@
 
 ## 署名与组成消歧规则
 
-- **`created_by` / `produced_by` / 专用码 / `credit_for` 边界**：原作者/原案用 `created_by`；动画制作公司、出品委员会、制片人、音乐制作人、同人社团、游戏厂商一律用 `produced_by` 并把原始职衔填入 `credit_role`；发行商写 `Release.attributes.publisher`。已有 16 条专用署名码覆盖的职责严禁降级为 `credit_for`，也严禁同一职责同时建专用边与 `credit_for`。
+- **`created_by` / `produced_by` / `published_by` / `operated_by` / 专用码 / `credit_for` 边界**：原作者/原案用 `created_by`；研发方用 `developed_by`；动画制作公司、出品委员会、制片人、音乐制作人、同人社团、原作出品方用 `produced_by` 并把原始职衔填入 `credit_role`；特定市场/版本的发行商、运营商挂对应 `Release` 的 `published_by` / `operated_by`（及 `publisher` / `operator` 字段），不挂 `Work.produced_by`。已有 18 条专用署名码覆盖的职责严禁降级为 `credit_for`，也严禁同一职责同时建专用边与 `credit_for`。
 - **一行多职拆分**：来源将多个职衔合并在同一行（如「監督・シリーズ構成・脚本 某人」）时，按各自语义拆成多条对应关系（`directed_by` 填 `監督`，`written_by` 填 `シリーズ構成・脚本`），不得将整串合并职衔原样贴到多条边上。
 - **歌曲署名与乐队成员**：词曲（`lyricist_of`、`composed_by`）通常落歌曲 `work`（`creation_form="song"`）；具体录音版本的编曲（`arranged_by`）、演唱/演奏（`performed_by`）及录音/混音工程（`credit_for` + `credit_role`）落对应 `expression`（并按需带 `context`），不把单版署名泛化到整首 Work。团体表演挂团体 `agent`，已知成员组成用 `member_of` 连接个人与团体。
 - **企划与专辑组成**：跨媒体企划（`collection_type="franchise"`）和系列（`series`）用 `includes` 聚合动画、剧场版、游戏、漫画、小说、音乐企划 `work`；专辑/单曲 `work` 用 `includes` 包含各首 `song` `work`。实际盘面曲序收录走 `Release.subjects` + `Medium` + `Track.contents`，不拿 `includes` 或 `pressing_of` 替代载体收录。
@@ -78,9 +80,12 @@
 | `context` | entity → `work`\|`content_unit`\|`expression`\|`release`\|`event` | 该署名或关系适用的具体作品/篇目/活动语境 |
 | `language` | text | 该署名对应的语言版本（`ja` / `zh-CN`…） |
 | `begin_date` / `end_date` | date | 关系成立的起止日期（同时填写时 `end_date >= begin_date`） |
+| `valid_from` / `valid_to` | date | 左闭右开有效区间 `[valid_from, valid_to)`（同时填写时 `valid_from < valid_to`），供 `/as-of` 与 `/compare` 精确重建时点关系 |
 | `ended` | boolean | 关系已终止标记（不知确切结束日但确认已退团/脱离隶属/卸任时设 `true`） |
 | `date_precision` | enum `date_precision` | `exact` / `circa` / `inferred` / `disputed` |
 | `earliest_date` / `latest_date` | date | 关系起止日期不确定时的考据上下界（同时填写时 `latest_date >= earliest_date`） |
+| `region` / `platform` / `channel` | text | 适用地区、平台与渠道范围 |
+| `scoped_release` | entity → `release` | 适用的特定 `release` 条目 UUID |
 | `transition_type` | enum `transition_type` | 仅 `succeeded_by` 允许：`rename` / `merger` / `acquisition` / `split` / `transfer` |
 | `scope` | text | 适用范围说明的自由文本 |
 
