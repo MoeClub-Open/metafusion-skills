@@ -216,6 +216,15 @@ export function publicFailure(response) {
     if (typeof response.body.pointer === "string" && (response.body.pointer === "" || response.body.pointer.startsWith("/")))
       out.pointer = response.body.pointer;
     if (response.body.applied === false) out.applied = false;
+    for (const key of ["entity_id", "relation_id", "field", "old", "new", "release_id", "work_id", "unknown_field", "ref", "expected_pattern", "reason", "rule_code"]) {
+      if (typeof response.body[key] === "string") out[key] = response.body[key];
+    }
+    if (Number.isSafeInteger(response.body.max_limit) && response.body.max_limit > 0)
+      out.max_limit = response.body.max_limit;
+    for (const key of ["allowed", "examples"]) {
+      if (Array.isArray(response.body[key]) && response.body[key].every((item) => typeof item === "string"))
+        out[key] = response.body[key];
+    }
   }
   if (out.error === "workspace_conflict" && Array.isArray(response?.body?.conflicts))
     out.conflicts = response.body.conflicts.filter((conflict) => conflict && typeof conflict === "object").map((conflict) => Object.fromEntries(
@@ -293,6 +302,7 @@ export async function request(
             etag: response.headers.get("etag"),
             location: response.headers.get("location"),
             retryAfter: response.headers.get("retry-after"),
+            requestId: response.headers.get("x-request-id"),
           },
           pat,
         ),

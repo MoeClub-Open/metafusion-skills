@@ -307,3 +307,21 @@ test("writableEntity 保留完整可写实体并剔除只读投影", () => {
   assert.equal(writable.updated_at, undefined);
   assert.equal(writable.medium_formats, undefined);
 });
+
+test("request retains x-request-id and publicFailure preserves structured 400 diagnostics", async () => {
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: "immutable_scope", entity_id: "ent-1", field: "release_id", old: "rel-1", new: "", internal: "drop" }), {
+      status: 400,
+      headers: { "content-type": "application/json", "x-request-id": "req-abc-123" },
+    });
+
+  const result = await request("/api/catalog/workspaces/w/push", { method: "POST", body: {} });
+  assert.equal(result.headers?.requestId, "req-abc-123");
+  assert.deepEqual(publicFailure(result), {
+    error: "immutable_scope",
+    entity_id: "ent-1",
+    field: "release_id",
+    old: "rel-1",
+    new: "",
+  });
+});

@@ -248,3 +248,27 @@ test("version reads work without a local copy and preserve server filters", asyn
   }
   await assert.rejects(runWorkspace("history", {origin, limit:101}), /invalid_limit/);
 });
+
+test("init removes pending marker on deterministic 4xx but keeps it on 5xx", async (t) => {
+  const f400 = fixture(t);
+  const fail400 = await runWorkspace("init", {
+    ...f400.options,
+    name: "bad",
+    requestFn: async () => ({ status: 400, body: { error: "invalid_payload", unknown_field: "foo" } }),
+  });
+  assert.equal(fail400.ok, false);
+  assert.equal(fail400.result.unknown_field, "foo");
+  assert.equal(fs.existsSync(path.join(f400.dir, ".mf-workspace-init.json")), false);
+  const retryOk = await runWorkspace("init", { ...f400.options, name: "good" });
+  assert.equal(retryOk.ok, true);
+
+  const f500 = fixture(t);
+  const fail500 = await runWorkspace("init", {
+    ...f500.options,
+    name: "retry-me",
+    requestFn: async () => ({ status: 500, body: { error: "internal_error" } }),
+  });
+  assert.equal(fail500.ok, false);
+  assert.equal(fail500.reason, "creation_result_unknown_keep_original_request");
+  assert.equal(fs.existsSync(path.join(f500.dir, ".mf-workspace-init.json")), true);
+});

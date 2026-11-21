@@ -291,6 +291,9 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
         ? await send(`${API}/workspaces/${encoded(options.workspaceID)}`)
         : await send(`${API}/workspaces${command==="fork"?"/fork":""}`, "POST", creation.body);
       if (![200, 201].includes(response.status) || !isWorkspace(response.body)) {
+        if (response.status >= 400 && response.status < 500 && fs.existsSync(pendingFile)) {
+          fs.unlinkSync(pendingFile);
+        }
         return { ok: false, status: response.status, result: publicFailure(response),
           ...(response.status === 0 || response.status >= 500 ? { reason: "creation_result_unknown_keep_original_request",request:creation.body } : {}) };
       }
