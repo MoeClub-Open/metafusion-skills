@@ -175,6 +175,8 @@ interface WorkspaceOptions {
   limit?: number;
   offset?: number;
   status?: string;
+  clean?: boolean;
+  force?: boolean;
 }
 const read = (file: string) => JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
 function save(file: string, value: unknown) {
@@ -187,6 +189,21 @@ function isWorkspace(value: unknown): value is CatalogWorkspace {
   return record(value) && typeof value.id === "string" && Number.isSafeInteger(value.version)
     && value.version > 0 && Array.isArray(value.objects)
     && (value.head_commit_id === null || typeof value.head_commit_id === "string");
+}
+function compactWorkspace(workspace: CatalogWorkspace): CatalogWorkspace {
+  return {
+    id: workspace.id,
+    owner_id: workspace.owner_id,
+    name: workspace.name,
+    version: workspace.version,
+    head_commit_id: workspace.head_commit_id,
+    base_commit_id: workspace.base_commit_id ?? null,
+    pending_commits: workspace.pending_commits ?? 0,
+    state: workspace.state,
+    members: Array.isArray(workspace.members) ? workspace.members : [],
+    dirty_count: workspace.dirty_count ?? 0,
+    objects: [],
+  };
 }
 function input(options: WorkspaceOptions) {
   return options.file ? read(options.file) : undefined;
@@ -226,6 +243,41 @@ const queryPath = (pathname: string, query: URLSearchParams) => `${pathname}${qu
  *  server; the version/head below are compare-and-swap expectations. */
 export async function runWorkspace(command: string, options: WorkspaceOptions = {}) {
   const { requestFn = request, entityIDs = [], relationIDs = [] } = options;
+  if (command === "clean") {
+    if (!options.dir) throw new Error("workspace_directory_required");
+    const directory = path.resolve(options.dir);
+    if (!fs.existsSync(directory)) return { ok: true, removed: [], removed_dir: false };
+    const stateFile = path.join(directory, ".mf-workspace.json");
+    const pendingFile = path.join(directory, ".mf-workspace-init.json");
+    const lockFile = path.join(directory, ".mf-workspace.lock");
+    if (options.force && fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
+    const lock = fs.openSync(lockFile, "wx", 0o600);
+    fs.writeFileSync(lock, String(process.pid));
+    const removed: string[] = [];
+    try {
+      if (!options.force) {
+        if (fs.existsSync(stateFile) && read(stateFile)?.pending)
+          throw new Error("pending_request_exists_use_receipt_or_force");
+        if (fs.existsSync(pendingFile))
+          throw new Error("pending_init_exists_use_force");
+      }
+      for (const file of [stateFile, pendingFile]) {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+          removed.push(path.basename(file));
+        }
+      }
+    } finally {
+      fs.closeSync(lock);
+      fs.rmSync(lockFile, { force: true });
+    }
+    let removedDir = false;
+    if (fs.existsSync(directory) && fs.readdirSync(directory).length === 0) {
+      fs.rmdirSync(directory);
+      removedDir = true;
+    }
+    return { ok: true, removed, removed_dir: removedDir };
+  }
   if (command === "init" && !options.workspaceID && entityIDs.length + relationIDs.length > 100)
     throw new Error("checkout_limit_exceeded: initialize with at most 100 entity and relation IDs; add the rest with checkout");
   const origin = new URL(options.origin ?? configuredOrigin()).origin;
@@ -278,6 +330,7 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
   const lockFile = path.join(directory, ".mf-workspace.lock");
   const lock = fs.openSync(lockFile, "wx", 0o600);
   fs.writeFileSync(lock, String(process.pid));
+  let removeDirAfterUnlock = false;
   try {
     if (command === "init" || command === "fork") {
       if (fs.existsSync(stateFile)) throw new Error("workspace_already_initialized");
@@ -297,7 +350,7 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
         return { ok: false, status: response.status, result: publicFailure(response),
           ...(response.status === 0 || response.status >= 500 ? { reason: "creation_result_unknown_keep_original_request",request:creation.body } : {}) };
       }
-      save(stateFile, { origin, workspace: response.body });
+      save(stateFile, { origin, workspace: compactWorkspace(response.body) });
       if(fs.existsSync(pendingFile))fs.unlinkSync(pendingFile);
       return { ok: true, workspace: response.body };
     }
@@ -307,16 +360,17 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
     const workspacePath = `${API}/workspaces/${encoded(state.workspace.id)}`;
     const responseResult = (response) => ({ ok: response.status >= 200 && response.status < 300,
       status: response.status, result: response.status >= 200 && response.status < 300 ? response.body : publicFailure(response) });
-    const refresh = async () => {
+    const refresh = async (): Promise<CatalogWorkspace | undefined> => {
       const current = await send(workspacePath);
-      if (current.status !== 200 || !isWorkspace(current.body)) return false;
-      state.workspace = current.body;
+      if (current.status !== 200 || !isWorkspace(current.body)) return undefined;
+      state.workspace = compactWorkspace(current.body);
       save(stateFile, state);
-      return true;
+      return current.body;
     };
     if (command === "get" || command === "status") {
-      if (!await refresh()) return { ok: false, reason: "workspace_read_failed" };
-      return { ok: true, workspace: state.workspace, ...(state.pending ? { unknown_request: state.pending } : {}) };
+      const refreshed = await refresh();
+      if (!refreshed) return { ok: false, reason: "workspace_read_failed" };
+      return { ok: true, workspace: refreshed, ...(state.pending ? { unknown_request: state.pending } : {}) };
     }
     if (["commits","events","tags","stashes","merge-status","diff"].includes(command)) {
       const query = readQuery(options, command === "commits" ? "branch" : command === "diff" ? "records" : "page");
@@ -341,7 +395,7 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
           save(stateFile, state);
         }
         const refreshed = await refresh();
-        return { ok: true, commit: response.body, workspace_refreshed: refreshed, workspace: state.workspace,
+        return { ok: true, commit: response.body, workspace_refreshed: Boolean(refreshed), workspace: refreshed ?? state.workspace,
           ...(state.pending ? { unknown_request: state.pending } : {}) };
       }
       return { ...responseResult(response), reason: "commit_result_not_confirmed_keep_id" };
@@ -457,31 +511,47 @@ export async function runWorkspace(command: string, options: WorkspaceOptions = 
     delete state.pending;
     const workspace = isWorkspace(response.body) ? response.body
       : isWorkspace(response.body?.workspace) ? response.body.workspace : undefined;
-    if (workspace) state.workspace = workspace;
+    if (workspace) state.workspace = compactWorkspace(workspace);
     save(stateFile, state);
+    const cleanMeta: Record<string, unknown> = {};
+    if (command === "push" && options.clean && response.status >= 200 && response.status < 300) {
+      if (response.body?.applied === true || options.force) {
+        fs.rmSync(stateFile, { force: true });
+        fs.rmSync(path.join(directory, ".mf-workspace-init.json"), { force: true });
+        removeDirAfterUnlock = true;
+        cleanMeta.cleaned = true;
+      } else {
+        cleanMeta.cleaned = false;
+        cleanMeta.clean_skipped = "pull_request_open";
+      }
+    }
     // A reviewer receives only the frozen PR/commits. A null workspace is an
     // intentional privacy boundary, not a reason to fetch the source worktree.
     if (response.status >= 200 && response.status < 300 && response.body?.workspace === null)
-      return { ...responseResult(response), workspace: null };
+      return { ...responseResult(response), workspace: null, ...cleanMeta };
     if (!workspace && response.status >= 200 && response.status < 300) {
       const refreshed = await refresh();
-      return { ...responseResult(response), workspace_refreshed: refreshed, workspace: state.workspace };
+      return { ...responseResult(response), workspace_refreshed: Boolean(refreshed), workspace: refreshed ?? state.workspace, ...cleanMeta };
     }
-    return { ...responseResult(response), workspace: state.workspace };
+    return { ...responseResult(response), workspace: workspace ?? state.workspace, ...cleanMeta };
   } finally {
     fs.closeSync(lock);
-    fs.unlinkSync(lockFile);
+    fs.rmSync(lockFile, { force: true });
+    if (removeDirAfterUnlock && fs.existsSync(directory) && fs.readdirSync(directory).length === 0) {
+      fs.rmdirSync(directory);
+    }
   }
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (!command || command === "help") {
-    console.log("mf-workspace head|history|revisions|diff|commit-diff|pr-diff|pr-commits|init|fork|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|members|edit|version|tag|tags|stash|stashes|events|merge-status|snapshot|compare|blame|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
+    console.log("mf-workspace head|history|revisions|diff|commit-diff|pr-diff|pr-commits|init|fork|list|get|status|checkout|stage|commit|commits|push|rebase|receipt|retry|clean|members|edit|version|tag|tags|stash|stashes|events|merge-status|snapshot|compare|blame|pr-list|pr-create|pr-get|pr-edit|pr-merge\n"
       + "--dir DIR holds the last observed server workspace, version and head; never credentials.\n"
       + "init: [--name NAME] [--entity UUID] [--relation UUID], or --workspace UUID to attach.\n"
       + "checkout: --entity UUID / --relation UUID (at most 100 IDs combined per request). stage: --file operations.json (array or {operations}; 1–100 operations, missing create refs are generated).\n"
-      + "commit: --message TEXT or --message-file PATH (use - for stdin), [--commit UUID]. Repeated stage saves can share one commit. push: [--title TEXT].\n"
+      + "commit: --message TEXT or --message-file PATH (use - for stdin), [--commit UUID]. Repeated stage saves can share one commit. push: [--title TEXT] [--clean] [--force].\n"
+      + "clean: --dir DIR [--force]. Removes local workspace state files (and empty DIR) once finished.\n"
       + "rebase: [--onto UUID] [--file native-rebase.json] [--message TEXT] [--commit UUID]. receipt: [--commit UUID].\n"
       + "fork: --dir NEW_DIR --commit UUID [--name NAME] [--entity UUID / --relation UUID].\n"
       + "version|tag|stash: --file native-action.json [--request UUID]. Version/head come from the saved observed copy.\n"
@@ -497,7 +567,10 @@ export async function runCli(argv = process.argv.slice(2)) {
     "--author":"authorID","--since":"since","--until":"until","--state":"state","--basis":"basis","--base":"baseID","--onto":"ontoID","--request":"requestID","--target":"target","--record":"recordID","--pointer":"pointer",
     "--message": "message", "--message-file": "messageFile", "--title": "title", "--commit": "commitID", "--pr": "pullRequestID", "--file": "file", "--status": "status" };
   for (let i = 0; i < args.length; i++) {
-    const flag = args[i], value = args[++i];
+    const flag = args[i];
+    if (flag === "--clean") { options.clean = true; continue; }
+    if (flag === "--force") { options.force = true; continue; }
+    const value = args[++i];
     if (!value || value.startsWith("--")) throw new Error(`missing_argument:${flag}`);
     if (flag === "--entity") options.entityIDs!.push(value);
     else if (flag === "--relation") options.relationIDs!.push(value);

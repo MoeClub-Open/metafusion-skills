@@ -4,7 +4,7 @@
 
 本地工具使用 Node.js 24+ 原生运行 TypeScript；完整复制技能目录并保留上级 `package.json`。不提供 JavaScript 包装器或编译产物。仓库开发校验使用 `bun install --frozen-lockfile`、`bun run typecheck` 与 `bun run test`。
 
-任务中新增的 Node 脚本也使用 `.ts`，通过 `node <脚本>.ts` 直接运行；导入使用当前技能目录中的 TypeScript 工具路径，不复制旧客户端。中间脚本放独立任务目录，不能放进技能安装目录。
+任务中新增的 Node 脚本也使用 `.ts`，通过 `node <脚本>.ts` 直接运行；导入使用当前技能目录中的 TypeScript 工具路径，不复制旧客户端。中间脚本、JSON 载荷、工作副本状态和下载图片必须放系统临时目录（`$TMPDIR/mf-<task>` / `$env:TEMP\mf-<task>`），不能放进技能目录或 `MetaFusion/docs-local/`，任务结束后立即清理。
 
 ## 凭据
 
@@ -13,4 +13,4 @@
 
 ## 客户端与工作区
 
-`request` 提供认证与只读重试，`collectPages` 保留分页覆盖证明；不提供整实体 putEntity 写入 helper。编目编辑使用 [mf-workspace](../references/workflow.md)，凭据文件放工作区之外；每个 Agent 使用自己的目录。
+`request` 提供认证与只读重试，`collectPages` 保留分页覆盖证明；不提供整实体 `putEntity` 写入 helper。编目编辑使用 [mf-workspace](../references/workflow.md)，凭据文件放工作区之外；每个 Agent 在系统临时目录下使用各自独立的 `TASK_DIR`，禁止把全量分页列表或 `stage`/`push` 原始响应落盘，完成后执行 `clean` 删除临时目录。

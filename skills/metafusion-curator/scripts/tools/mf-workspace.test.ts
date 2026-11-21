@@ -272,3 +272,35 @@ test("init removes pending marker on deterministic 4xx but keeps it on 5xx", asy
   assert.equal(fail500.reason, "creation_result_unknown_keep_original_request");
   assert.equal(fs.existsSync(path.join(f500.dir, ".mf-workspace-init.json")), true);
 });
+
+test("local state strips bulky objects and clean/push --clean removes finished workspace dir", async (t) => {
+  const f = await prepared(t);
+  assert.deepEqual(f.readState().workspace.objects, []);
+  await runWorkspace("stage", { ...f.options, operations: operation("Slim") });
+  assert.deepEqual(f.readState().workspace.objects, []);
+  await runWorkspace("commit", { ...f.options, message: "Slim commit" });
+
+  f.setMode("pr");
+  const prPush = await runWorkspace("push", { ...f.options, clean: true });
+  assert.equal(prPush.ok, true);
+  assert.equal((prPush as any).cleaned, false);
+  assert.equal(fs.existsSync(path.join(f.dir, ".mf-workspace.json")), true);
+
+  f.setMode("direct");
+  const directPush = await runWorkspace("push", { ...f.options, clean: true });
+  assert.equal(directPush.ok, true);
+  assert.equal((directPush as any).cleaned, true);
+  assert.equal(fs.existsSync(f.dir), false);
+});
+
+test("clean refuses to wipe pending unknown requests unless forced", async (t) => {
+  const f = await prepared(t);
+  await runWorkspace("stage", { ...f.options, operations: operation("Mine") });
+  f.throwAfter("commit");
+  await runWorkspace("commit", { ...f.options, message: "Pending" });
+  await assert.rejects(runWorkspace("clean", { dir: f.dir }), /pending_request_exists_use_receipt_or_force/);
+  const forced = await runWorkspace("clean", { dir: f.dir, force: true });
+  assert.equal(forced.ok, true);
+  assert.equal((forced as any).removed_dir, true);
+  assert.equal(fs.existsSync(f.dir), false);
+});

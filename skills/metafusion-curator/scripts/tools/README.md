@@ -22,7 +22,8 @@ node mf-workspace.ts init --dir TASK_DIR --name "修订资料"
 node mf-workspace.ts checkout --dir TASK_DIR --entity ENTITY_UUID
 node mf-workspace.ts stage --dir TASK_DIR --file operations.json
 node mf-workspace.ts commit --dir TASK_DIR --message "修订题名与收录"
-node mf-workspace.ts push --dir TASK_DIR
+node mf-workspace.ts push --dir TASK_DIR --clean
+node mf-workspace.ts clean --dir TASK_DIR
 node mf-workspace.ts pr-list
 node mf-workspace.ts pr-get --pr PR_UUID
 node mf-workspace.ts pr-diff --pr PR_UUID --target entity
@@ -30,7 +31,7 @@ node mf-workspace.ts history --record ENTITY_UUID --limit 20
 node mf-workspace.ts revisions --record ENTITY_UUID --version 1
 ```
 
-init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本。本地目录只保存连接状态与已观察到的 version/head，所有工作内容和提交都存服务器。副本可多次 stage、commit，并通过 members 共同编辑；普通用户 push 发 PR，免审用户直接合入。未知结果保留状态并读取副本、commit 与 PR；详见[协作流程](../../references/workflow.md)。
+init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本。`TASK_DIR` 应建于系统临时目录（`$TMPDIR/mf-<task>`），`.mf-workspace.json` 仅保存精简的副本元信息（不含 `objects` 实体快照），所有工作内容和提交都存服务器。副本可多次 stage、commit，并通过 members 共同编辑；普通用户 push 发 PR，免审用户直接合入。`push --clean` 在直接合入（`applied=true`）后自动清理本地状态与空目录；普通 PR 或人工收尾在合入/关闭后执行 `clean --dir TASK_DIR` 并删除已下载图片和中间 JSON，避免磁盘膨胀。未知结果保留状态并读取副本、commit 与 PR；详见[协作流程](../../references/workflow.md)。
 
 正文和图片都使用普通 stage patch，没有单独的文章写通道。source_refs、候选查证数组和来源池不是 stage/commit 参数。
 
@@ -48,7 +49,7 @@ init 创建服务器副本，也可通过 `--workspace UUID` 连接已有副本�
 
 `mf-audit-external-links` 按当前外链类型选择 Bangumi 条目、人物、角色或单集接口，并检查 MusicBrainz 普通、发行、录音外链；同一实体的每条匹配外链分别核对。ID 从必填 URL 解析，提供了 external_id 时还须与 URL 一致。`checked` 计外链数，`ok` 仅表示类型和题名线索相符，`identity_verified` 仍为 false；来源不可用列入 unknown，审计不自动修改目录。
 
-来源 help/list 不联网，读取用 `run <operation> <arg>`；完整运行输出保存在任务目录，不放进技能安装目录。所有来源与诊断工具都是可选辅助，不构成提交门槛。
+来源 help/list 不联网，读取用 `run <operation> <arg>`；若需落盘运行输出只放系统临时目录并在任务结束一并删除，不放进技能安装目录或主仓 `docs-local/`，也不保存大体积原始响应或全库分页快照。所有来源与诊断工具都是可选辅助，不构成提交门槛。
 
 AniList 搜索默认动画；漫画和轻小说用 `node mf-source.ts run anilist.search "检索词" --type MANGA`。详情裸 ID 也可用 `--type MANGA`，URL 中的 `/anime/`、`/manga/` 按原链接决定类型。
 

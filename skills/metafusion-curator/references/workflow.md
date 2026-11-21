@@ -10,7 +10,7 @@
 
 **新建前近似查重（Agent 硬规）**：HTTP 与副本协议层将 `/api/catalog/entities/candidates` 及 `/candidates/batch` 作为只读辅助接口，不阻断 `stage`，也不要求提交 `reviewed_candidate_ids`；但对于 AI Agent（技能、MCP、站内助手、Planner/Worker），在暂存任何 `action: "create"` 前**必须**先执行带近似匹配的身份候选查询。候选接口默认索引 `core_title`（折叠全角 ASCII，剥离 `株式会社`/`Co., Ltd.` 等法人词缀、`(TVアニメ)`/`[CD]` 等末尾媒介限定括号及中点/标点，命中记 `title_core`），传 `include_approximate: true`（本地 `--approximate`）额外召回子串与 `pg_trgm`（`word_similarity >= 0.6`）近似题名候选（记 `title_similar`，默认建议 `review`）；主分类不一致（`agent_type_mismatch` / `creation_form_mismatch` / `collection_type_mismatch`）在 `assessment.conflicts` 报告并建议 `distinct`。凡返回 `reuse` 或 `review` 候选，Agent 必须检查 `assessment` 并回读候选实体详情与关联边，确认复用已有 UUID 还是新建独立实体（如同名 `song` Work 与 `single`/`original_album` Work、第 1 季与第 2 季）。
 
-在技能的 `scripts/tools/` 目录运行，`TASK_DIR` 是本任务的本地目录：
+在技能的 `scripts/tools/` 目录运行，`TASK_DIR` 必须设在系统临时目录（如 `$TMPDIR/mf-<task>` 或 `$env:TEMP\mf-<task>`），不得设在 `metafusion-skills/` 或 `MetaFusion/docs-local/` 内：
 
 ```sh
 node mf-find-identity.ts --kind work --title "待建题名" --attribute creation_form=tv_anime --approximate
@@ -19,7 +19,7 @@ node mf-workspace.ts checkout --dir TASK_DIR --entity ENTITY_UUID
 node mf-workspace.ts stage --dir TASK_DIR --file operations.json
 node mf-workspace.ts commit --dir TASK_DIR --message "修订发行题名与收录"
 node mf-workspace.ts status --dir TASK_DIR
-node mf-workspace.ts push --dir TASK_DIR
+node mf-workspace.ts push --dir TASK_DIR --clean
 ```
 
 `operations.json` 是 stage 的操作数组，示例见[协作载荷](api-templates.md#协作载荷)。已有副本可用 `init --dir TASK_DIR --workspace WORKSPACE_UUID` 连接。stage 可重复执行；读取返回的 refs，用稳定 UUID 在后续操作或提交中引用新对象。`commit` 固定当前未提交改动，生成不可变提交并记录实际操作者；提交后仍可继续编辑。`push` 合并副本基线到已提交 head 的净变更；存在未提交改动时，先完成 commit 再 push。
@@ -43,7 +43,7 @@ node mf-workspace.ts push --dir TASK_DIR
 
 `workspace_conflict` 的每项包含 target、id、pointer、base、current、proposed 和 current_version。核对双方意图后，用 `rebase --file rebase.json` 传原生请求对象（含 resolutions）；每项传明确值或 remove，commit_id 原样取冲突的 source_commit_id，后一步冲突时保留先前解决项；同时固定 expected_version/head，生成新提交，旧提交保留。若正式目录再次变化，重新获取冲突，不沿用过时的 current_version。resolution 形状见[载荷](api-templates.md#冲突解决)。
 
-网络失败不能证明操作未执行。保留本地状态、workspace_id、commit ID 与 PR ID，通过 status、`receipt --commit UUID` 和 pr-get 确定实际结果；不把未知结果当作需要新建提交。遵守 `Retry-After`，不自动增加并发绕过限流。仅在结果明确且无恢复需要后清理本任务的本地文件。
+网络失败不能证明操作未执行。保留本地状态、workspace_id、commit ID 与 PR ID，通过 status、`receipt --commit UUID` 和 pr-get 确定实际结果；不把未知结果当作需要新建提交。遵守 `Retry-After`，不自动增加并发绕过限流。结果明确且无恢复需要后（如 `push` `applied=true` 或 PR 已合入/关闭），立即使用 `node mf-workspace.ts clean --dir TASK_DIR`（或 `push --clean`）清除 `.mf-workspace.json` 及空目录，并删除 `TASK_DIR` 内的临时脚本、操作 JSON、响应转储与已上传图片；禁止把 `stage`/`push` 全量输出或全库列表长期留存磁盘。
 
 ## 分支与历史
 
